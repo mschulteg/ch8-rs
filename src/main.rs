@@ -4,24 +4,44 @@ use std::time::{Duration, Instant};
 use rand::prelude::*;
 
 pub struct Timer {
+    start: Instant,
     last_update: Instant,
-    dt_hires: f64,
-    st_hires: f64,
-    last_clock_steps: u64,
+    freq_hz: f64,
+    multi: f64,
+    _reg_value: u8,
 }
 
 impl Default for Timer {
     fn default() -> Self {
         Self {
+            start: Instant::now(),
             last_update: Instant::now(),
-            dt_hires: 0f64,
-            st_hires: 0f64,
-            last_clock_steps: 0,
+            freq_hz: 60.0,
+            multi: 1.0,
+            _reg_value: 0,
         }
     }
 }
 
+impl Timer {
+    fn set_reg(&mut self, val: u8) {
+        self.last_update = Instant::now();
+        self._reg_value = val;
+    }
 
+    fn get_reg(&self) -> u8 {
+        if self._reg_value == 0 {
+            return 0;
+        }
+        let until_now = Instant::now() - self.start;
+        let until_last_update = self.last_update - self.start;
+        let steps_now = until_now.as_secs_f64() * self.freq_hz * self.multi;
+        let steps_last_update = until_last_update.as_secs_f64() * self.freq_hz * self.multi;
+        // cast to int to make the divisions above integer divisions
+        let diff = steps_now as u64 - steps_last_update as u64;
+        return if (self._reg_value as u64) < diff {0} else {self._reg_value - diff as u8};
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 enum VKey {
@@ -156,15 +176,14 @@ impl Display {
 pub struct Cpu {
     pub display: Display,
     pub keyboard: Keyboard,
-    pub timer: Timer,
+    pub dt: Timer,
+    pub st: Timer,
     pub memory: [u8; 4096],
     pub v: [u8; 16],
     pub pc: u16,
     pub sp: u8,
     pub stack: [u16; 16],
     pub i: u16,
-    pub dt: u8,
-    pub st: u8,
     pub clock_steps: u64,
     pub multi: f64,
 }
@@ -174,15 +193,14 @@ impl Default for Cpu {
         Self {
             display: Display::default(),
             keyboard: Keyboard::default(),
-            timer: Timer::default(),
+            dt: Timer::default(),
+            st: Timer::default(),
             memory: [0u8; 4096],
             v: [0u8; 16],
             pc: 0x200,
             sp: 0,
             stack: [0u16; 16],
             i: 0,
-            dt: 0,
-            st: 0,
             clock_steps: 0,
             multi: 1f64,
         }
@@ -194,7 +212,7 @@ impl fmt::Debug for Cpu {
         fmt.debug_struct("Foo")
             .field("pc", &format_args!("{:#X}", self.pc))
             .field("i", &format_args!("{:#X}", self.i))
-            .field("dt", &self.dt)
+            .field("dt", &self.dt.get_reg())
             .field("v", &self.v)
             .field("sp", &self.sp)
             .field("stack", &self.stack)
@@ -206,7 +224,8 @@ impl fmt::Debug for Cpu {
 impl Cpu {
     fn new(code: &[u8], multi: f64) -> Self {
         let mut cpu = Self::default();
-        cpu.multi = multi;
+        cpu.dt.multi = multi;
+        cpu.st.multi = multi;
         cpu.memory[0..80].copy_from_slice(&cpu.display.std_sprites());
         cpu.memory[0x200..0x200 + code.len()].copy_from_slice(code);
         cpu.pc = 0x200;
@@ -216,58 +235,11 @@ impl Cpu {
     fn tick(&mut self) -> u16 {
         let instr = read_memory(&self.memory, self.pc);
         //println!("HIER:{:#X}", instr);
-        self.update_dt(None);
         self.process_instruction(instr);
         self.clock_steps += 1;
         //assert!((self.pc % 2) == 0, "program counter is not even");
         // slipperyslope jumps to uneven instruction (level-unpack at 0x265 (0x65 in file))
         instr
-    }
-
-    fn update_dt(&mut self, cpu_freq: Option<f64>) {
-        match cpu_freq {
-            Some(cpu_freq) => {
-                let diff_clk = self.clock_steps - self.timer.last_clock_steps;
-                let diff = diff_clk as f64 / cpu_freq;
-                let diff_dt = diff * 60.0 * self.multi;
-                if self.timer.dt_hires < 0f64 {
-                    self.timer.dt_hires = 0f64;
-                }
-                self.timer.st_hires -= diff_dt;
-                if self.timer.st_hires < 0f64 {
-                    self.timer.st_hires = 0f64;
-                }
-                self.dt = self.timer.dt_hires as u8;
-                self.st = self.timer.st_hires as u8;
-
-                self.timer.last_clock_steps = self.clock_steps;
-            }
-            None => {
-                let diff = Instant::now() - self.timer.last_update;
-                let diff_dt = diff.as_secs_f64() * 60.0 * self.multi;
-                self.timer.dt_hires -= diff_dt;
-                if self.timer.dt_hires < 0f64 {
-                    self.timer.dt_hires = 0f64;
-                }
-                self.timer.st_hires -= diff_dt;
-                if self.timer.st_hires < 0f64 {
-                    self.timer.st_hires = 0f64;
-                }
-                self.dt = self.timer.dt_hires as u8;
-                self.st = self.timer.st_hires as u8;
-                self.timer.last_update = Instant::now();
-            }
-        }
-    }
-
-    fn set_dt(&mut self, dt: u8) {
-        self.dt = dt;
-        self.timer.dt_hires = dt as f64;
-    }
-
-    fn set_st(&mut self, st: u8) {
-        self.st = st;
-        self.timer.st_hires = st as f64;
     }
 
     fn process_instruction(&mut self, instr: u16) {
@@ -447,7 +419,7 @@ impl Cpu {
             0xF => match kk {
                 0x07 => {
                     // Fx07 - LD Vx, DT
-                    self.v[x] = self.dt;
+                    self.v[x] = self.dt.get_reg();
                 }
                 0x0A => {
                     // Fx0A - LD Vx, K
@@ -467,11 +439,11 @@ impl Cpu {
                 }
                 0x15 => {
                     // Fx15 - LD DT, Vx
-                    self.set_dt(self.v[x]);
+                    self.dt.set_reg(self.v[x]);
                 }
                 0x18 => {
                     // Fx18 - LD ST, Vx
-                    self.set_st(self.v[x]);
+                    self.st.set_reg(self.v[x]);
                 }
                 0x1E => {
                     // Fx1E - ADD I, Vx
