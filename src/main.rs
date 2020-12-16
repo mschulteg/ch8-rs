@@ -11,19 +11,19 @@ pub struct Timer {
     _reg_value: u8,
 }
 
-impl Default for Timer {
-    fn default() -> Self {
+
+impl Timer {
+    fn new() -> Self {
+        let time = Instant::now();
         Self {
-            start: Instant::now(),
-            last_update: Instant::now(),
+            start: time,
+            last_update: time,
             freq_hz: 60.0,
             multi: 1.0,
             _reg_value: 0,
         }
     }
-}
 
-impl Timer {
     fn set_reg(&mut self, val: u8) {
         self.last_update = Instant::now();
         self._reg_value = val;
@@ -185,7 +185,6 @@ pub struct Cpu {
     pub stack: [u16; 16],
     pub i: u16,
     pub clock_steps: u64,
-    pub multi: f64,
 }
 
 impl Default for Cpu {
@@ -193,8 +192,8 @@ impl Default for Cpu {
         Self {
             display: Display::default(),
             keyboard: Keyboard::default(),
-            dt: Timer::default(),
-            st: Timer::default(),
+            dt: Timer::new(),
+            st: Timer::new(),
             memory: [0u8; 4096],
             v: [0u8; 16],
             pc: 0x200,
@@ -202,7 +201,6 @@ impl Default for Cpu {
             stack: [0u16; 16],
             i: 0,
             clock_steps: 0,
-            multi: 1f64,
         }
     }
 }
@@ -506,6 +504,7 @@ const HEIGHT: usize = 32;
 fn main() {
     println!("Hello, world!");
 
+    //let path = "roms/Delay Timer Test [Matthew Mikolay, 2010].ch8";
     let path = "roms/slipperyslope.ch8";
     //let path = "roms/octojam2title.ch8";
     //let path = "roms/Chip8 Picture.ch8";
