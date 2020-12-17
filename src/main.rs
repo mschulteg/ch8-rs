@@ -425,10 +425,7 @@ impl Cpu {
                         .keyboard
                         .keys
                         .iter()
-                        .enumerate()
-                        .filter(|&(_, v)| *v == VKey::Down)
-                        .map(|(i, _)| i)
-                        .next();
+                        .position(|&v| v == VKey::Down);
                     if let Some(pressed_key) = pressed_key {
                         self.v[x] = pressed_key as u8;
                     } else {
@@ -503,15 +500,14 @@ const HEIGHT: usize = 32;
 
 fn main() {
     println!("Hello, world!");
+    let path = std::env::args().nth(1).expect("no file given");
 
-    //let path = "roms/Delay Timer Test [Matthew Mikolay, 2010].ch8";
-    let path = "roms/slipperyslope.ch8";
-    //let path = "roms/octojam2title.ch8";
-    //let path = "roms/Chip8 Picture.ch8";
     let f = File::open(path).unwrap();
     let mut buf_reader = BufReader::new(f);
     let mut code = Vec::<u8>::new();
     buf_reader.read_to_end(&mut code);
+
+    //let code = include_bytes!("../roms/slipperyslope.ch8");
 
     let mut cpu = Cpu::new(&code, 1.0);
 
