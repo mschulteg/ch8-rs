@@ -571,37 +571,7 @@ use minifb::{Key, Scale, Window, WindowOptions};
 const WIDTH: usize = 64;
 const HEIGHT: usize = 32;
 
-fn main() {
-    println!("Hello, world!");
-    let path = std::env::args().nth(1).expect("no file given");
-
-    let f = File::open(path).unwrap();
-    let mut buf_reader = BufReader::new(f);
-    let mut code = Vec::<u8>::new();
-    buf_reader.read_to_end(&mut code);
-
-    //let code = include_bytes!("../roms/slipperyslope.ch8");
-
-    let mut cpu = Cpu::new(&code, 1.0);
-
-    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
-    let mut window_options = WindowOptions::default();
-    window_options.scale = Scale::X16;
-    let mut window = Window::new("Test - ESC to exit", WIDTH, HEIGHT, window_options)
-        .unwrap_or_else(|e| {
-            panic!("{}", e);
-        });
-
-    //window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
-    window.limit_update_rate(None);
-
-    let mut last_display_update = 0;
-
-    let mut perfcnt_clock_steps = 0u64;
-    let mut perfcnt_sprites = 0u64;
-    let mut perfcnt = 0u64;
-    let mut perfcnt_time = Instant::now();
-
+fn set_keys(window: &Window, cpu_keyboard: &mut Keyboard) {
     let keys = [
         Key::X,
         Key::Key1,
@@ -620,38 +590,47 @@ fn main() {
         Key::F,
         Key::V,
     ];
+    keys.iter()
+    .map(|key| {
+        if window.is_key_down(*key) {
+            VKey::Down
+        } else {
+            VKey::Up
+        }
+    })
+    .zip(cpu_keyboard.keys.iter_mut())
+    .for_each(|(winkey, cpukey)| *cpukey = winkey);
+}
+
+fn main() {
+    println!("Hello, world!");
+    let path = std::env::args().nth(1).expect("no file given");
+
+    let f = File::open(path).unwrap();
+    let mut buf_reader = BufReader::new(f);
+    let mut code = Vec::<u8>::new();
+    buf_reader.read_to_end(&mut code);
+
+    let mut cpu = Cpu::new(&code, 1.0);
+
+    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+    let mut window_options = WindowOptions::default();
+    window_options.scale = Scale::X16;
+    let mut window = Window::new("Test - ESC to exit", WIDTH, HEIGHT, window_options)
+        .unwrap_or_else(|e| {
+            panic!("{}", e);
+        });
+
+    //window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+    window.limit_update_rate(None);
 
     let mut perf_cycles = PerfLimiter::new(210.0);
     let mut perf_display = PerfLimiter::new(100.0);
     println!("{}", perf_display.every_nths);
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        // if perfcnt % 100 == 0 {
-        //     let delta_t = perfcnt_time.elapsed().as_secs_f64();
-        //     let delta_clock_steps = cpu.clock_steps - perfcnt_clock_steps;
-        //     let delta_sprites = cpu.display.updates - perfcnt_sprites;
-        //     println!(
-        //         "tps: {}; fps: {}",
-        //         delta_clock_steps as f64 / delta_t,
-        //         delta_sprites as f64 / delta_t,
-        //     );
-        //     perfcnt_clock_steps = cpu.clock_steps;
-        //     perfcnt_sprites = cpu.display.updates;
-        //     perfcnt_time = Instant::now();
-        // }
-        // perfcnt += 1;
-
 
         loop {
-            keys.iter()
-                .map(|key| {
-                    if window.is_key_down(*key) {
-                        VKey::Down
-                    } else {
-                        VKey::Up
-                    }
-                })
-                .zip(cpu.keyboard.keys.iter_mut())
-                .for_each(|(winkey, cpukey)| *cpukey = winkey);
+            set_keys(&window, &mut cpu.keyboard);
             println!("{:?}", cpu.keyboard.keys);
             println!("{:?}", cpu);
             let instr = cpu.tick();
@@ -667,13 +646,10 @@ fn main() {
         println!("tps: {}", perf_cycles.get_fps());
         println!("fps: {}", perf_display.get_fps());
 
-        if true { //cpu.display.updates != last_display_update {
-            last_display_update = cpu.display.updates;
-            let display_data = cpu.display.render_to_buf();
-            for (disp, b) in display_data.iter().zip(buffer.iter_mut()) {
-                //*b = *disp as u32 * 0x00FFFFFF;
-                *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
-            }
+        let display_data = cpu.display.render_to_buf();
+        for (disp, b) in display_data.iter().zip(buffer.iter_mut()) {
+            //*b = *disp as u32 * 0x00FFFFFF;
+            *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
         }
 
         // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
