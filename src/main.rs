@@ -1,7 +1,11 @@
 use std::fmt;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
+use std::thread;
 use std::time::{Duration, Instant};
 
-use rand::prelude::*;
+use minifb::{Key, Scale, Window, WindowOptions};
 
 pub struct Timer {
     start: Instant,
@@ -10,7 +14,6 @@ pub struct Timer {
     multi: f64,
     _reg_value: u8,
 }
-
 
 impl Timer {
     fn new() -> Self {
@@ -39,7 +42,11 @@ impl Timer {
         let steps_last_update = until_last_update.as_secs_f64() * self.freq_hz * self.multi;
         // cast to int to make the divisions above integer divisions
         let diff = steps_now as u64 - steps_last_update as u64;
-        return if (self._reg_value as u64) < diff {0} else {self._reg_value - diff as u8};
+        return if (self._reg_value as u64) < diff {
+            0
+        } else {
+            self._reg_value - diff as u8
+        };
     }
 }
 
@@ -53,7 +60,6 @@ enum VKey {
 pub struct Keyboard {
     keys: [VKey; 16],
     prev_keys: [VKey; 16],
-
 }
 
 impl Default for Keyboard {
@@ -424,11 +430,7 @@ impl Cpu {
                 }
                 0x0A => {
                     // Fx0A - LD Vx, K
-                    let pressed_key = self
-                        .keyboard
-                        .keys
-                        .iter()
-                        .position(|&v| v == VKey::Down);
+                    let pressed_key = self.keyboard.keys.iter().position(|&v| v == VKey::Down);
                     let mut key_change = false;
                     if let Some(pressed_key) = pressed_key {
                         if self.keyboard.prev_keys[pressed_key] == VKey::Up {
@@ -492,10 +494,6 @@ fn read_memory(mem: &[u8; 4096], addr: u16) -> u16 {
     (mem[addr as usize] as u16) << 8 | mem[addr as usize + 1] as u16
 }
 
-fn write_memory(mem: &mut [u8; 4096], addr: u16, val: u16) {
-    mem[addr as usize] = ((val >> 8) & 0xFF) as u8;
-    mem[addr as usize + 1] = (val & 0xFF) as u8;
-}
 
 pub struct PerfLimiter {
     pub last_check: Instant,
@@ -511,13 +509,26 @@ pub struct PerfLimiter {
 impl PerfLimiter {
     fn new(fps_limit: f64) -> Self {
         let time = Instant::now();
-        let every_nths = if fps_limit as u64 >= 100 {fps_limit as u64 / 100} else {1};
-        Self {last_check: time, last_fps_check: time, fps_limit, counter: 0, last_counter: 0, every_nths, nths_counter: 0}
+        let every_nths = if fps_limit as u64 >= 100 {
+            fps_limit as u64 / 100
+        } else {
+            1
+        };
+        Self {
+            last_check: time,
+            last_fps_check: time,
+            fps_limit,
+            counter: 0,
+            last_counter: 0,
+            every_nths,
+            nths_counter: 0,
+        }
     }
 
     fn get_fps(&mut self) -> f64 {
         let now = Instant::now();
-        let fps = (self.counter - self.last_counter) as f64 / (now - self.last_fps_check).as_secs_f64();
+        let fps =
+            (self.counter - self.last_counter) as f64 / (now - self.last_fps_check).as_secs_f64();
         self.last_fps_check = now;
         self.last_counter = self.counter;
         fps
@@ -547,7 +558,7 @@ impl PerfLimiter {
     }
 
     // true means wait, false means time is over
-    fn wait_nonblocking(&mut self) -> bool{
+    fn wait_nonblocking(&mut self) -> bool {
         let now = Instant::now();
         let diff = now - self.last_check;
         let wait = 1.0 / self.fps_limit - diff.as_secs_f64();
@@ -560,13 +571,6 @@ impl PerfLimiter {
         }
     }
 }
-
-use std::fs::File;
-use std::io::BufReader;
-use std::io::Read;
-use std::thread;
-
-use minifb::{Key, Scale, Window, WindowOptions};
 
 const WIDTH: usize = 64;
 const HEIGHT: usize = 32;
@@ -591,25 +595,24 @@ fn set_keys(window: &Window, cpu_keyboard: &mut Keyboard) {
         Key::V,
     ];
     keys.iter()
-    .map(|key| {
-        if window.is_key_down(*key) {
-            VKey::Down
-        } else {
-            VKey::Up
-        }
-    })
-    .zip(cpu_keyboard.keys.iter_mut())
-    .for_each(|(winkey, cpukey)| *cpukey = winkey);
+        .map(|key| {
+            if window.is_key_down(*key) {
+                VKey::Down
+            } else {
+                VKey::Up
+            }
+        })
+        .zip(cpu_keyboard.keys.iter_mut())
+        .for_each(|(winkey, cpukey)| *cpukey = winkey);
 }
 
 fn main() {
-    println!("Hello, world!");
-    let path = std::env::args().nth(1).expect("no file given");
+    let path = std::env::args().nth(1).expect("No file given");
 
     let f = File::open(path).unwrap();
     let mut buf_reader = BufReader::new(f);
     let mut code = Vec::<u8>::new();
-    buf_reader.read_to_end(&mut code);
+    buf_reader.read_to_end(&mut code).expect("Could not read file to end");
 
     let mut cpu = Cpu::new(&code, 1.0);
 
@@ -628,19 +631,16 @@ fn main() {
     let mut perf_display = PerfLimiter::new(100.0);
     println!("{}", perf_display.every_nths);
     while window.is_open() && !window.is_key_down(Key::Escape) {
-
         loop {
             set_keys(&window, &mut cpu.keyboard);
-            println!("{:?}", cpu.keyboard.keys);
-            println!("{:?}", cpu);
-            let instr = cpu.tick();
-            //perf_cycles.counter += 1;
+            // println!("{:?}", cpu.keyboard.keys);
+            // println!("{:?}", cpu);
+            // println!("Instruction: {:#X}", read_memory(&cpu.memory, cpu.pc));
+            cpu.tick();
             if !perf_display.wait_nonblocking() {
                 break;
             }
             perf_cycles.wait();
-            //thread::sleep(Duration::from_millis(10));
-            println!("Instruction: {:#X}", instr);
         }
 
         println!("tps: {}", perf_cycles.get_fps());
@@ -652,7 +652,6 @@ fn main() {
             *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
         }
 
-        // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
 }
