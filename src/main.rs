@@ -52,12 +52,15 @@ enum VKey {
 #[derive(Debug)]
 pub struct Keyboard {
     keys: [VKey; 16],
+    prev_keys: [VKey; 16],
+
 }
 
 impl Default for Keyboard {
     fn default() -> Self {
         Self {
             keys: [VKey::Up; 16],
+            prev_keys: [VKey::Up; 16],
         }
     }
 }
@@ -426,9 +429,15 @@ impl Cpu {
                         .keys
                         .iter()
                         .position(|&v| v == VKey::Down);
+                    let mut key_change = false;
                     if let Some(pressed_key) = pressed_key {
-                        self.v[x] = pressed_key as u8;
-                    } else {
+                        if self.keyboard.prev_keys[pressed_key] == VKey::Up {
+                            self.v[x] = pressed_key as u8;
+                            key_change = true
+                        }
+                    }
+                    self.keyboard.prev_keys = self.keyboard.keys;
+                    if !key_change {
                         return;
                     }
                 }
@@ -488,6 +497,70 @@ fn write_memory(mem: &mut [u8; 4096], addr: u16, val: u16) {
     mem[addr as usize + 1] = (val & 0xFF) as u8;
 }
 
+pub struct PerfLimiter {
+    pub last_check: Instant,
+    pub last_fps_check: Instant,
+    pub fps_limit: f64,
+    pub counter: u64,
+    pub last_counter: u64,
+
+    pub every_nths: u64,
+    pub nths_counter: u64,
+}
+
+impl PerfLimiter {
+    fn new(fps_limit: f64) -> Self {
+        let time = Instant::now();
+        let every_nths = if fps_limit as u64 >= 100 {fps_limit as u64 / 100} else {1};
+        Self {last_check: time, last_fps_check: time, fps_limit, counter: 0, last_counter: 0, every_nths, nths_counter: 0}
+    }
+
+    fn get_fps(&mut self) -> f64 {
+        let now = Instant::now();
+        let fps = (self.counter - self.last_counter) as f64 / (now - self.last_fps_check).as_secs_f64();
+        self.last_fps_check = now;
+        self.last_counter = self.counter;
+        fps
+    }
+
+    fn wait(&mut self) {
+        self.counter += 1;
+
+        if self.every_nths > 1 {
+            if self.nths_counter < self.every_nths - 1 {
+                self.nths_counter += 1;
+                return;
+            }
+            self.nths_counter = 0;
+        }
+
+        let now = Instant::now();
+        let diff = now - self.last_check;
+        let wait = self.every_nths as f64 / self.fps_limit - diff.as_secs_f64();
+        if self.fps_limit == 0.0 || wait <= 0.0 {
+            self.last_check = now;
+            return;
+        }
+
+        thread::sleep(Duration::from_secs_f64(wait));
+        self.last_check = Instant::now();
+    }
+
+    // true means wait, false means time is over
+    fn wait_nonblocking(&mut self) -> bool{
+        let now = Instant::now();
+        let diff = now - self.last_check;
+        let wait = 1.0 / self.fps_limit - diff.as_secs_f64();
+        if self.fps_limit == 0.0 || wait <= 0.0 {
+            self.last_check = now;
+            self.counter += 1;
+            false
+        } else {
+            true
+        }
+    }
+}
+
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
@@ -531,9 +604,9 @@ fn main() {
 
     let keys = [
         Key::X,
-        Key::NumPad1,
-        Key::NumPad2,
-        Key::NumPad3,
+        Key::Key1,
+        Key::Key2,
+        Key::Key3,
         Key::Q,
         Key::W,
         Key::E,
@@ -542,29 +615,33 @@ fn main() {
         Key::D,
         Key::Z,
         Key::C,
-        Key::NumPad4,
+        Key::Key4,
         Key::R,
         Key::F,
         Key::V,
     ];
 
+    let mut perf_cycles = PerfLimiter::new(210.0);
+    let mut perf_display = PerfLimiter::new(100.0);
+    println!("{}", perf_display.every_nths);
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        if perfcnt % 100 == 0 {
-            let delta_t = perfcnt_time.elapsed().as_secs_f64();
-            let delta_clock_steps = cpu.clock_steps - perfcnt_clock_steps;
-            let delta_sprites = cpu.display.updates - perfcnt_sprites;
-            println!(
-                "tps: {}; fps: {}",
-                delta_clock_steps as f64 / delta_t,
-                delta_sprites as f64 / delta_t,
-            );
-            perfcnt_clock_steps = cpu.clock_steps;
-            perfcnt_sprites = cpu.display.updates;
-            perfcnt_time = Instant::now();
-        }
-        perfcnt += 1;
+        // if perfcnt % 100 == 0 {
+        //     let delta_t = perfcnt_time.elapsed().as_secs_f64();
+        //     let delta_clock_steps = cpu.clock_steps - perfcnt_clock_steps;
+        //     let delta_sprites = cpu.display.updates - perfcnt_sprites;
+        //     println!(
+        //         "tps: {}; fps: {}",
+        //         delta_clock_steps as f64 / delta_t,
+        //         delta_sprites as f64 / delta_t,
+        //     );
+        //     perfcnt_clock_steps = cpu.clock_steps;
+        //     perfcnt_sprites = cpu.display.updates;
+        //     perfcnt_time = Instant::now();
+        // }
+        // perfcnt += 1;
 
-        while cpu.display.updates == last_display_update {
+
+        loop {
             keys.iter()
                 .map(|key| {
                     if window.is_key_down(*key) {
@@ -575,15 +652,22 @@ fn main() {
                 })
                 .zip(cpu.keyboard.keys.iter_mut())
                 .for_each(|(winkey, cpukey)| *cpukey = winkey);
-            //println!("{:?}", cpu.keyboard.keys);
-            //println!("{:?}", cpu);
+            println!("{:?}", cpu.keyboard.keys);
+            println!("{:?}", cpu);
             let instr = cpu.tick();
+            //perf_cycles.counter += 1;
+            if !perf_display.wait_nonblocking() {
+                break;
+            }
+            perf_cycles.wait();
             //thread::sleep(Duration::from_millis(10));
-            //println!("Instruction: {:#X}", instr);
-            //time::sleep(1);
+            println!("Instruction: {:#X}", instr);
         }
 
-        if cpu.display.updates != last_display_update {
+        println!("tps: {}", perf_cycles.get_fps());
+        println!("fps: {}", perf_display.get_fps());
+
+        if true { //cpu.display.updates != last_display_update {
             last_display_update = cpu.display.updates;
             let display_data = cpu.display.render_to_buf();
             for (disp, b) in display_data.iter().zip(buffer.iter_mut()) {
