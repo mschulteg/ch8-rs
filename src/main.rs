@@ -76,6 +76,7 @@ pub struct Display {
     // y: 0 - 31 bytes
     pub cells: [[u8; 8]; 32],
     updates: u64,
+    updated: bool,
 }
 
 impl Default for Display {
@@ -83,6 +84,7 @@ impl Default for Display {
         Self {
             cells: [[0u8; 8]; 32],
             updates: 0,
+            updated: true,
         }
     }
 }
@@ -146,6 +148,7 @@ impl Display {
             }
         }
         self.updates += 1;
+        self.updated = true;
         collision
     }
 
@@ -627,7 +630,7 @@ fn main() {
     //window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
     window.limit_update_rate(None);
 
-    let mut perf_cycles = PerfLimiter::new(210.0);
+    let mut perf_cycles = PerfLimiter::new(100000.0);
     let mut perf_display = PerfLimiter::new(100.0);
     println!("{}", perf_display.every_nths);
     while window.is_open() && !window.is_key_down(Key::Escape) {
@@ -643,15 +646,19 @@ fn main() {
             perf_cycles.wait();
         }
 
-        println!("tps: {}", perf_cycles.get_fps());
-        println!("fps: {}", perf_display.get_fps());
+        println!("tps: {}; fps: {}", perf_cycles.get_fps(), perf_display.get_fps());
 
-        let display_data = cpu.display.render_to_buf();
-        for (disp, b) in display_data.iter().zip(buffer.iter_mut()) {
-            //*b = *disp as u32 * 0x00FFFFFF;
-            *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
+        if cpu.display.updated {
+            cpu.display.updated = false;
+            let display_data = cpu.display.render_to_buf();
+            for (disp, b) in display_data.iter().zip(buffer.iter_mut()) {
+                //*b = *disp as u32 * 0x00FFFFFF;
+                *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
+            }
+            window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
         }
-
-        window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
+        else {
+            window.update();
+        }
     }
 }
