@@ -85,7 +85,7 @@ impl Default for Display {
 }
 
 pub fn display_cells_to_buf(cells: [[u8; 8]; 32]) -> Vec<u8> {
-    let mut buf = Vec::<u8>::new();
+    let mut buf = Vec::<u8>::with_capacity(32*64);
     for y in 0..32 {
         for x in 0..8 {
             for bit in 0..8 {
