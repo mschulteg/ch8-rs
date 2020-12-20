@@ -1,12 +1,26 @@
 mod cpu;
+mod emulator;
 mod perf;
-mod loop_minifb_thread;
-//mod loop_sdl2;
 
-//use loop_minifb::event_loop;
-use loop_minifb_thread::event_loop;
+use emulator::Emulator;
 
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
 
 fn main() {
-    event_loop();
+    let path = std::env::args().nth(1).expect("No file given");
+
+    let f = File::open(path).unwrap();
+    let mut buf_reader = BufReader::new(f);
+    let mut code = Vec::<u8>::new();
+    buf_reader
+        .read_to_end(&mut code)
+        .expect("Could not read file to end");
+
+    let emulator = Emulator::new()
+        .with_skip_frames()
+        .with_fps_limit(60.0)
+        .with_ips_limit(10000.0);
+    emulator.run(&code[..]);
 }

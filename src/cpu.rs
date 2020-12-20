@@ -259,7 +259,6 @@ impl Cpu {
 
     pub fn tick(&mut self) -> u16 {
         let instr = self.next_instruction();
-        //println!("HIER:{:#X}", instr);
         self.process_instruction(instr);
         self.clock_steps += 1;
         //assert!((self.pc % 2) == 0, "program counter is not even");

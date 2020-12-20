@@ -1,8 +1,4 @@
-use std::fs::File;
-use std::io::BufReader;
-use std::io::Read;
-
-use std::sync::mpsc::{self, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, TryRecvError, TrySendError, SendError};
 use std::thread;
 
 use super::cpu::{display_cells_to_buf, Cpu, VKey};
@@ -10,7 +6,11 @@ use super::perf::PerfLimiter;
 
 use minifb::{Key, Scale, Window, WindowOptions};
 
-struct Emulator {
+const WIDTH: usize = 64;
+const HEIGHT: usize = 32;
+
+#[derive(Copy, Clone)]
+pub struct Emulator {
     pub skip_frames: bool,
     pub fps_limit: Option<f64>,
     pub ips_limit: Option<f64>,
@@ -20,15 +20,15 @@ struct Emulator {
 impl Emulator {
     pub fn new() -> Self {
         Self {
-            skip_frames: true,
+            skip_frames: false,
             fps_limit: None,
             ips_limit: None,
             debug: false,
         }
     }
 
-    pub fn with_skip_frames(mut self, skip: bool) -> Self {
-        self.skip_frames = skip;
+    pub fn with_skip_frames(mut self) -> Self {
+        self.skip_frames = true;
         self
     }
 
@@ -68,6 +68,7 @@ impl Emulator {
         let mut ticker_tps = PerfLimiter::new(Some(1.0));
         let mut ticker_fps = PerfLimiter::new(Some(1.0));
         let debug = self.debug;
+        let skip_frames = self.skip_frames;
         let cpu_thread = thread::spawn(move || loop {
             if debug {
                 println!("{:?}", cpu.keyboard.keys);
@@ -78,18 +79,21 @@ impl Emulator {
             cpu.tick();
 
             //this variant skips frames
-            match tx_disp.try_send(cpu.display.cells) {
-                Ok(..) => {}
-                Err(TrySendError::Full(..)) => {} //skipped frame
-                Err(TrySendError::Disconnected(..)) => break,
+            if skip_frames {
+                match tx_disp.try_send(cpu.display.cells) {
+                    Ok(..) => {}
+                    Err(TrySendError::Full(..)) => {} //skipped frame
+                    Err(TrySendError::Disconnected(..)) => break,
+                }
+            }else {
+                if cpu.display.updated {
+                    cpu.display.updated = false;
+                    match tx_disp.send(cpu.display.cells) {
+                        Ok(..) => {},
+                        Err(SendError(..)) => {break},
+                    }
+                }
             }
-            // if cpu.display.updated {
-            //     cpu.display.updated = false;
-            //     match tx_disp.send(cpu.display.cells) {
-            //         Ok(..) => {},
-            //         Err(SendError(..)) => {break},
-            //     }
-            // }
 
             match rx_keys.try_recv() {
                 Ok(keys) => {
@@ -106,7 +110,6 @@ impl Emulator {
 
         while window.is_open() && !window.is_key_down(Key::Escape) {
             let cpu_keys = set_keys(&window);
-            //tx_keys.send(cpu_keys).unwrap();
             match tx_keys.try_send(cpu_keys) {
                 Ok(..) => {}
                 Err(TrySendError::Full(..)) => {} //skipped input
@@ -137,9 +140,6 @@ impl Emulator {
         cpu_thread.join().unwrap();
     }
 }
-
-const WIDTH: usize = 64;
-const HEIGHT: usize = 32;
 
 fn set_keys(window: &Window) -> [VKey; 16] {
     let keys = [
@@ -172,18 +172,4 @@ fn set_keys(window: &Window) -> [VKey; 16] {
         .zip(cpu_keys.iter_mut())
         .for_each(|(winkey, cpukey)| *cpukey = winkey);
     cpu_keys
-}
-
-pub fn event_loop() {
-    let path = std::env::args().nth(1).expect("No file given");
-
-    let f = File::open(path).unwrap();
-    let mut buf_reader = BufReader::new(f);
-    let mut code = Vec::<u8>::new();
-    buf_reader
-        .read_to_end(&mut code)
-        .expect("Could not read file to end");
-
-    let emulator = Emulator::new().with_fps_limit(60.0).with_ips_limit(10000.0);
-    emulator.run(&code[..]);
 }
