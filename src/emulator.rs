@@ -14,7 +14,7 @@ pub struct Emulator {
     pub skip_frames: bool,
     pub fps_limit: Option<f64>,
     pub ips_limit: Option<f64>,
-    pub debug: bool,
+    pub debug: u64,
 }
 
 impl Emulator {
@@ -23,27 +23,27 @@ impl Emulator {
             skip_frames: false,
             fps_limit: None,
             ips_limit: None,
-            debug: false,
+            debug: 0,
         }
     }
 
-    pub fn with_skip_frames(mut self) -> Self {
-        self.skip_frames = true;
+    pub fn with_skip_frames(mut self, skip: bool) -> Self {
+        self.skip_frames = skip;
         self
     }
 
-    pub fn with_fps_limit(mut self, limit: f64) -> Self {
-        self.fps_limit = Some(limit);
+    pub fn with_fps_limit(mut self, limit: Option<f64>) -> Self {
+        self.fps_limit = limit;
         self
     }
 
-    pub fn with_ips_limit(mut self, limit: f64) -> Self {
-        self.ips_limit = Some(limit);
+    pub fn with_ips_limit(mut self, limit: Option<f64>) -> Self {
+        self.ips_limit = limit;
         self
     }
 
-    pub fn with_debug(mut self) -> Self {
-        self.debug = true;
+    pub fn with_debug(mut self, debug: u64) -> Self {
+        self.debug = debug;
         self
     }
 
@@ -70,7 +70,7 @@ impl Emulator {
         let debug = self.debug;
         let skip_frames = self.skip_frames;
         let cpu_thread = thread::spawn(move || loop {
-            if debug {
+            if debug >= 2 {
                 println!("{:?}", cpu.keyboard.keys);
                 println!("{:?}", cpu);
                 println!("Instruction: {:#X}", cpu.next_instruction());
@@ -103,7 +103,7 @@ impl Emulator {
                 Err(TryRecvError::Disconnected) => break,
             }
             perf_cpu.wait();
-            if !ticker_tps.wait_nonblocking() {
+            if !ticker_tps.wait_nonblocking() && debug >= 1{
                 println!("tps: {}", perf_cpu.get_fps());
             }
         });
@@ -130,8 +130,8 @@ impl Emulator {
                 Err(TryRecvError::Disconnected) => break,
             }
             perf_io.wait();
-            if !ticker_fps.wait_nonblocking() {
-                println!("tps: {}", perf_io.get_fps());
+            if !ticker_fps.wait_nonblocking() && debug >= 1{
+                println!("fps: {}", perf_io.get_fps());
             }
         }
         println!("exiting");
