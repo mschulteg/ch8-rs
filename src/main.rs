@@ -20,7 +20,7 @@ fn main() {
 
     let emulator = Emulator::new()
         .with_skip_frames()
-        .with_fps_limit(60.0)
-        .with_ips_limit(10000.0);
+        .with_fps_limit(60.0);
+        //.with_ips_limit(10000.0);
     emulator.run(&code[..]);
 }
