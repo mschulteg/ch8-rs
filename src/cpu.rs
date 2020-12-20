@@ -1,6 +1,8 @@
 use std::fmt;
 use std::time::Instant;
 
+pub const WIDTH: usize = 64;
+pub const HEIGHT: usize = 32;
 
 pub struct Timer {
     start: Instant,
@@ -69,7 +71,7 @@ impl Default for Keyboard {
 pub struct Display {
     // x: 0 - 63 pixels or 0-7 bytes
     // y: 0 - 31 bytes
-    pub cells: [[u8; 8]; 32],
+    pub cells: [[u8; WIDTH / 8]; HEIGHT],
     pub updates: u64,
     pub updated: bool,
 }
@@ -77,17 +79,17 @@ pub struct Display {
 impl Default for Display {
     fn default() -> Self {
         Self {
-            cells: [[0u8; 8]; 32],
+            cells: [[0u8; WIDTH / 8]; HEIGHT],
             updates: 0,
             updated: true,
         }
     }
 }
 
-pub fn display_cells_to_buf(cells: [[u8; 8]; 32]) -> Vec<u8> {
-    let mut buf = Vec::<u8>::with_capacity(32*64);
-    for y in 0..32 {
-        for x in 0..8 {
+pub fn display_cells_to_buf(cells: [[u8; WIDTH / 8]; HEIGHT]) -> Vec<u8> {
+    let mut buf = Vec::<u8>::with_capacity(WIDTH * HEIGHT);
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH / 8 {
             for bit in 0..8 {
                 if ((cells[y][x] >> (7 - bit)) & 0x1) == 1 {
                     buf.push(1);
@@ -102,55 +104,20 @@ pub fn display_cells_to_buf(cells: [[u8; 8]; 32]) -> Vec<u8> {
 
 impl Display {
     fn clear(&mut self) {
-        for y in 0..32 {
-            for x in 0..8 {
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH / 8 {
                 self.cells[y][x] = 0;
             }
         }
         self.updates += 1
     }
 
-    fn render_to_str(&self) -> String {
-        let mut string = String::new();
-        for y in 0..32 {
-            for x in 0..8 {
-                for bit in 0..8 {
-                    if ((self.cells[y][x] >> (7 - bit)) & 0x1) == 1 {
-                        string.push('#');
-                        string.push('#');
-                    } else {
-                        string.push(' ');
-                        string.push(' ');
-                    }
-                }
-            }
-            string.push('\n');
-        }
-        string
-    }
-
-    pub fn render_to_buf(&self) -> Vec<u8> {
-        let mut buf = Vec::<u8>::new();
-        for y in 0..32 {
-            for x in 0..8 {
-                for bit in 0..8 {
-                    if ((self.cells[y][x] >> (7 - bit)) & 0x1) == 1 {
-                        buf.push(1);
-                    } else {
-                        buf.push(0);
-                    }
-                }
-            }
-        }
-        buf
-    }
-
     fn write_sprite(&mut self, sprite: &[u8], x: u8, y: u8) -> bool {
         let mut collision = false;
-        let x = x % 64;
-        let y = y % 32;
+        let x = x % WIDTH as u8;
+        let y = y % HEIGHT as u8;
         for i in 0..sprite.len() {
-            let y_roll = ((y as usize + i) % 32) as u8;
+            let y_roll = ((y as usize + i) % HEIGHT) as u8;
             let cur_val = self.get_byte(x, y_roll);
             let new_val = cur_val ^ sprite[i];
             self.set_byte(x, y_roll, new_val);
@@ -167,7 +134,7 @@ impl Display {
         let offs_bytes = x as usize / 8;
         let offs_bits = x as usize % 8;
         let line = &self.cells[y as usize];
-        let word = (line[offs_bytes] as u16) << 8 | line[(offs_bytes + 1) % 8] as u16;
+        let word = (line[offs_bytes] as u16) << 8 | line[(offs_bytes + 1) % (WIDTH / 8)] as u16;
         let res = ((word >> (8 - offs_bits)) & 0xFF) as u8;
         res
     }
@@ -177,7 +144,7 @@ impl Display {
         let offs_bits = x as usize % 8;
         let line = &mut self.cells[y as usize];
 
-        let mut word = (line[offs_bytes] as u16) << 8 | line[(offs_bytes + 1) % 8] as u16;
+        let mut word = (line[offs_bytes] as u16) << 8 | line[(offs_bytes + 1) % (WIDTH / 8)] as u16;
         word &= !(0xFF << (8 - offs_bits));
         word |= (val as u16) << (8 - offs_bits);
         line[offs_bytes] = ((word >> 8) & 0xFF) as u8;

@@ -1,13 +1,12 @@
 use std::sync::mpsc::{self, SendError, TryRecvError, TrySendError};
 use std::thread;
 
-use super::cpu::{display_cells_to_buf, Cpu, VKey};
+use super::cpu::{display_cells_to_buf, Cpu, VKey, WIDTH, HEIGHT};
 use super::perf::PerfLimiter;
 
 use minifb::{Key, Scale, Window, WindowOptions};
 
-const WIDTH: usize = 64;
-const HEIGHT: usize = 32;
+
 
 #[derive(Copy, Clone)]
 pub struct Emulator {
@@ -61,7 +60,7 @@ impl Emulator {
         window.limit_update_rate(None);
 
         let (tx_keys, rx_keys) = mpsc::sync_channel::<[VKey; 16]>(1);
-        let (tx_disp, rx_disp) = mpsc::sync_channel::<[[u8; 8]; 32]>(1);
+        let (tx_disp, rx_disp) = mpsc::sync_channel::<[[u8; WIDTH / 8]; HEIGHT]>(1);
 
         let mut perf_io = PerfLimiter::new(self.fps_limit);
         let mut perf_cpu = PerfLimiter::new(self.ips_limit);
