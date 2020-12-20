@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, TryRecvError, TrySendError, SendError};
+use std::sync::mpsc::{self, SendError, TryRecvError, TrySendError};
 use std::thread;
 
 use super::cpu::{display_cells_to_buf, Cpu, VKey};
@@ -85,12 +85,12 @@ impl Emulator {
                     Err(TrySendError::Full(..)) => {} //skipped frame
                     Err(TrySendError::Disconnected(..)) => break,
                 }
-            }else {
+            } else {
                 if cpu.display.updated {
                     cpu.display.updated = false;
                     match tx_disp.send(cpu.display.cells) {
-                        Ok(..) => {},
-                        Err(SendError(..)) => {break},
+                        Ok(..) => {}
+                        Err(SendError(..)) => break,
                     }
                 }
             }
@@ -109,7 +109,7 @@ impl Emulator {
         });
 
         while window.is_open() && !window.is_key_down(Key::Escape) {
-            let cpu_keys = set_keys(&window);
+            let cpu_keys = convert_keys(&window);
             match tx_keys.try_send(cpu_keys) {
                 Ok(..) => {}
                 Err(TrySendError::Full(..)) => {} //skipped input
@@ -141,7 +141,7 @@ impl Emulator {
     }
 }
 
-fn set_keys(window: &Window) -> [VKey; 16] {
+fn convert_keys(window: &Window) -> [VKey; 16] {
     let keys = [
         Key::X,
         Key::Key1,
