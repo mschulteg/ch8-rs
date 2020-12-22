@@ -76,27 +76,70 @@ pub struct Display {
     pub height: usize,
     pub updates: u64,
     pub updated: bool,
+    pub extended: bool,
 }
-
 
 impl Display {
     fn new(height: usize, width: usize) -> Self {
         Self {
-            cells: vec![0u8; height*width],
+            cells: vec![0u8; height * width],
             width: width,
             height: height,
             updates: 0,
             updated: true,
+            extended: false,
         }
+    }
+
+    fn set_extended(&mut self, ext: bool) {
+        if ext {
+            self.height = HEIGHT * 2;
+            self.width = WIDTH * 2;
+        } else {
+            self.height = HEIGHT;
+            self.width = WIDTH;
+        }
+        self.extended = ext;
+        self.cells = vec![0u8; self.height * self.width];
+    }
+
+    fn flag_updated(&mut self) {
+        self.updated = true;
+        self.updates += 1;
+    }
+
+    fn scroll_down(&mut self, n: u8) {
+        self.cells.rotate_right(n as usize * self.width / 8);
+        self.flag_updated();
+    }
+
+    fn scroll_right(&mut self) {
+        let mut last_nibble = 0u8;
+        for val in self.cells.iter_mut() {
+            let tmp = *val & 0xF;
+            *val = (*val >> 4) | (last_nibble << 4);
+            last_nibble = tmp;
+        }
+        self.flag_updated();
+    }
+
+    fn scroll_left(&mut self) {
+        let mut last_nibble = 0u8;
+        for val in self.cells.iter_mut().rev() {
+            let tmp = (*val & 0xF0) >> 4;
+            *val = (*val << 4) | last_nibble;
+            last_nibble = tmp;
+        }
+        self.flag_updated();
     }
 
     fn clear(&mut self) {
         for y in 0..self.height {
             for x in 0..self.width / 8 {
-                self.cells[y*(self.width / 8) + x] = 0;
+                self.cells[y * (self.width / 8) + x] = 0;
             }
         }
-        self.updates += 1
+        self.flag_updated();
     }
 
     pub fn to_buf(&self) -> Vec<u8> {
@@ -105,7 +148,7 @@ impl Display {
         for y in 0..self.height {
             for x in 0..self.width / 8 {
                 for bit in 0..8 {
-                    if ((cells[y*(self.width / 8) + x] >> (7 - bit)) & 0x1) == 1 {
+                    if ((cells[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) == 1 {
                         buf.push(1);
                     } else {
                         buf.push(0);
@@ -129,8 +172,22 @@ impl Display {
                 collision = true;
             }
         }
-        self.updates += 1;
-        self.updated = true;
+        self.flag_updated();
+        collision
+    }
+
+    fn write_sprite16(&mut self, sprite: &[u8; 16], x: u8, y: u8) -> bool {
+        let mut collision = false;
+        let mut left = [0u8, 16];
+        let mut right = [0u8, 16];
+        for (src, dest) in sprite.iter().step_by(2).zip(left.iter_mut()) {
+            *dest = *src;
+        }
+        for (src, dest) in sprite.iter().skip(1).step_by(2).zip(right.iter_mut()) {
+            *dest = *src;
+        }
+        collision |= self.write_sprite(&left[..], x, y);
+        collision |= self.write_sprite(&right[..], x + 8, y);
         collision
     }
 
@@ -139,8 +196,8 @@ impl Display {
         let offs_bits = x as usize % 8;
         let line_offs = y as usize * self.width / 8;
 
-
-        let word = (self.cells[line_offs + offs_bytes] as u16) << 8 | self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] as u16;
+        let word = (self.cells[line_offs + offs_bytes] as u16) << 8
+            | self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] as u16;
         let res = ((word >> (8 - offs_bits)) & 0xFF) as u8;
         res
     }
@@ -150,7 +207,8 @@ impl Display {
         let offs_bits = x as usize % 8;
         let line_offs = y as usize * self.width / 8;
 
-        let mut word = (self.cells[line_offs + offs_bytes] as u16) << 8 | self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] as u16;
+        let mut word = (self.cells[line_offs + offs_bytes] as u16) << 8
+            | self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] as u16;
         word &= !(0xFF << (8 - offs_bits));
         word |= (val as u16) << (8 - offs_bits);
         self.cells[line_offs + offs_bytes] = ((word >> 8) & 0xFF) as u8;
@@ -165,6 +223,19 @@ impl Display {
             0xF0, 0x90, 0xF0, 0xF0, 0x90, 0xF0, 0x10, 0xF0, 0xF0, 0x90, 0xF0, 0x90, 0x90, 0xE0,
             0x90, 0xE0, 0x90, 0xE0, 0xF0, 0x80, 0x80, 0x80, 0xF0, 0xE0, 0x90, 0x90, 0x90, 0xE0,
             0xF0, 0x80, 0xF0, 0x80, 0xF0, 0xF0, 0x80, 0xF0, 0x80, 0x80,
+        ]
+    }
+
+    fn hires_sprites(&self) -> [u8; 100] {
+        [
+            0x3C, 0x7E, 0xE7, 0xC3, 0xC3, 0xC3, 0xC3, 0xE7, 0x7E, 0x3C, 0x18, 0x38, 0x58, 0x18,
+            0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x3E, 0x7F, 0xC3, 0x06, 0x0C, 0x18, 0x30, 0x60,
+            0xFF, 0xFF, 0x3C, 0x7E, 0xC3, 0x03, 0x0E, 0x0E, 0x03, 0xC3, 0x7E, 0x3C, 0x06, 0x0E,
+            0x1E, 0x36, 0x66, 0xC6, 0xFF, 0xFF, 0x06, 0x06, 0xFF, 0xFF, 0xC0, 0xC0, 0xFC, 0xFE,
+            0x03, 0xC3, 0x7E, 0x3C, 0x3E, 0x7C, 0xC0, 0xC0, 0xFC, 0xFE, 0xC3, 0xC3, 0x7E, 0x3C,
+            0xFF, 0xFF, 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x60, 0x60, 0x3C, 0x7E, 0xC3, 0xC3,
+            0x7E, 0x7E, 0xC3, 0xC3, 0x7E, 0x3C, 0x3C, 0x7E, 0xC3, 0xC3, 0x7F, 0x3F, 0x03, 0x03,
+            0x3E, 0x7C,
         ]
     }
 }
@@ -221,6 +292,7 @@ impl Cpu {
         cpu.dt.multi = multi;
         cpu.st.multi = multi;
         cpu.memory[0..80].copy_from_slice(&cpu.display.std_sprites());
+        cpu.memory[80..180].copy_from_slice(&cpu.display.hires_sprites());
         cpu.memory[0x200..0x200 + code.len()].copy_from_slice(code);
         cpu.pc = 0x200;
         cpu
