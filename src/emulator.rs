@@ -49,9 +49,10 @@ impl Emulator {
     pub fn run(&self, code: &[u8]) {
         let mut cpu = Cpu::new(code, 1.0);
 
-        let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+        let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT * 4];
         let mut window_options = WindowOptions::default();
         window_options.scale = Scale::X16;
+        window_options.resize = true;
         let mut window = Window::new("Test - ESC to exit", WIDTH, HEIGHT, window_options)
             .unwrap_or_else(|e| {
                 panic!("{}", e);
@@ -128,6 +129,8 @@ impl Emulator {
                                 for (disp, b) in display_buf.iter().zip(buffer.iter_mut()) {
                                     *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
                                 }
+                                buffer[127] = 0x00FFFFFF;
+                                //println!("{} {} {}", display_buf.len(), height, width);
                                 window.update_with_buffer(&buffer, width, height).unwrap();
                             }
                         Err(RecvError) => break,

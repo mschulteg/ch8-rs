@@ -1,5 +1,6 @@
 use std::fmt;
 use std::time::Instant;
+use std::convert::TryInto;
 
 pub const WIDTH: usize = 64;
 pub const HEIGHT: usize = 32;
@@ -101,6 +102,7 @@ impl Display {
         }
         self.extended = ext;
         self.cells = vec![0u8; self.height * self.width];
+        println!("EXTENDED IS SET TO {}", self.extended);
     }
 
     fn flag_updated(&mut self) {
@@ -110,6 +112,9 @@ impl Display {
 
     fn scroll_down(&mut self, n: u8) {
         self.cells.rotate_right(n as usize * self.width / 8);
+        for pixel_byte in self.cells[0..n as usize * self.width / 8].iter_mut() {
+            *pixel_byte = 0;
+        }
         self.flag_updated();
     }
 
@@ -164,11 +169,12 @@ impl Display {
         let x = x % self.width as u8;
         let y = y % self.height as u8;
         for i in 0..sprite.len() {
-            let y_roll = ((y as usize + i) % HEIGHT) as u8;
+            let y_roll = ((y as usize + i) % self.height) as u8;
             let cur_val = self.get_byte(x, y_roll);
             let new_val = cur_val ^ sprite[i];
+            let cleared = cur_val & sprite[i];
             self.set_byte(x, y_roll, new_val);
-            if new_val != cur_val {
+            if cleared != 0 {
                 collision = true;
             }
         }
@@ -176,10 +182,10 @@ impl Display {
         collision
     }
 
-    fn write_sprite16(&mut self, sprite: &[u8; 16], x: u8, y: u8) -> bool {
+    fn write_sprite16(&mut self, sprite: &[u8; 32], x: u8, y: u8) -> bool {
         let mut collision = false;
-        let mut left = [0u8, 16];
-        let mut right = [0u8, 16];
+        let mut left = [0u8; 16];
+        let mut right = [0u8; 16];
         for (src, dest) in sprite.iter().step_by(2).zip(left.iter_mut()) {
             *dest = *src;
         }
@@ -212,7 +218,7 @@ impl Display {
         word &= !(0xFF << (8 - offs_bits));
         word |= (val as u16) << (8 - offs_bits);
         self.cells[line_offs + offs_bytes] = ((word >> 8) & 0xFF) as u8;
-        self.cells[line_offs + (offs_bytes + 1) % 8] = (word & 0xFF) as u8;
+        self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] = (word & 0xFF) as u8;
     }
 
     fn std_sprites(&self) -> [u8; 80] {
@@ -252,6 +258,7 @@ pub struct Cpu {
     pub stack: [u16; 16],
     pub i: u16,
     pub clock_steps: u64,
+    pub repl: [u8; 8],
 }
 
 impl Default for Cpu {
@@ -268,6 +275,7 @@ impl Default for Cpu {
             stack: [0u16; 16],
             i: 0,
             clock_steps: 0,
+            repl: [0u8; 8],
         }
     }
 }
@@ -323,12 +331,36 @@ impl Cpu {
         let kk: u8 = (instr & 0xFF) as u8;
 
         match (nibbles[0], nibbles[1], nibbles[2], nibbles[3]) {
+            (0x0, _, 0xC, _) => {
+                // Scroll display N lines down
+                self.display.scroll_down(nibbles[3]);
+            }
             (0x0, _, 0xE, 0x0) => {
                 self.display.clear();
             }
             (0x0, _, 0xE, 0xE) => {
                 self.pc = self.stack[self.sp as usize];
                 self.sp = self.sp - 1;
+            }
+            (0x0, _, 0xF, 0xB) => {
+                // Scroll display 4 pixels right
+                self.display.scroll_right();
+            }
+            (0x0, _, 0xF, 0xC) => {
+                // Scroll display 4 pixels left
+                self.display.scroll_left();
+            }
+            (0x0, _, 0xF, 0xD) => {
+                // Exit CHIP interpreter
+                println!("TODO: EXIT");
+            }
+            (0x0, _, 0xF, 0xE) => {
+                // Disable extended screen mode
+                self.display.set_extended(false);
+            }
+            (0x0, _, 0xF, 0xF) => {
+                // Enable extended screen mode
+                self.display.set_extended(true);
             }
             (0x1, ..) => {
                 // JP addr
@@ -455,10 +487,17 @@ impl Cpu {
             (0xD, ..) => {
                 // Dxyn - DRW Vx, Vy, nibble
                 let start = self.i as usize;
-                let end = start + nibbles[3] as usize;
-                let sprites = &self.memory[start..end];
-                let collision = self.display.write_sprite(sprites, self.v[x], self.v[y]);
-                self.v[0xF] = if collision { 1 } else { 0 };
+                if nibbles[3] == 0 {
+                    let end = start + 32 as usize;
+                    let sprites = &self.memory[start..end];
+                    let collision = self.display.write_sprite16(sprites.try_into().unwrap(), self.v[x], self.v[y]);
+                    self.v[0xF] = if collision { 1 } else { 0 };
+                }else {
+                    let end = start + nibbles[3] as usize;
+                    let sprites = &self.memory[start..end];
+                    let collision = self.display.write_sprite(sprites, self.v[x], self.v[y]);
+                    self.v[0xF] = if collision { 1 } else { 0 };
+                }
             }
             (0xE, _, 0x9, 0xE) => {
                 // Ex9E - SKP Vx
@@ -509,6 +548,10 @@ impl Cpu {
                 // Fx29 - LD F, Vx
                 self.i = self.v[x] as u16 * 5;
             }
+            (0xF, _, 0x3, 0x0) => {
+                // Fx30 - LD (Hires)F, Vx
+                self.i = self.v[x] as u16 * 10 + 16 * 5;
+            }
             (0xF, _, 0x3, 0x3) => {
                 // Fx33 - LD B, Vx
                 let i = self.i as usize;
@@ -531,6 +574,16 @@ impl Cpu {
                 let memslice = &self.memory[i..i + x + 1];
                 self.v[0..x + 1].copy_from_slice(memslice);
                 //self.i += x as u16 + 1;
+            }
+            (0xF, _, 0x7, 0x5) => {
+                // Fx75 - LD repl, Vx
+                let repl_slice = &mut self.repl[0..x + 1];
+                repl_slice.copy_from_slice(&self.v[0..x + 1]);
+            }
+            (0xF, _, 0x8, 0x5) => {
+                // Fx85 - LD Vx, repl
+                let memslice = &self.memory[0..x + 1];
+                self.v[0..x + 1].copy_from_slice(memslice);
             }
 
             _ => panic!("unknown opcode"),
