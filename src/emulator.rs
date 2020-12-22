@@ -1,7 +1,7 @@
 use std::sync::mpsc::{self, SendError, TryRecvError, TrySendError, RecvError};
 use std::thread;
 
-use super::cpu::{display_cells_to_buf, Cpu, VKey, WIDTH, HEIGHT};
+use super::cpu::{Cpu, VKey, WIDTH, HEIGHT};
 use super::perf::PerfLimiter;
 
 use minifb::{Key, Scale, Window, WindowOptions};

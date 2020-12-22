@@ -78,36 +78,18 @@ pub struct Display {
     pub updated: bool,
 }
 
-impl Default for Display {
-    fn default() -> Self {
+
+impl Display {
+    fn new(height: usize, width: usize) -> Self {
         Self {
-            cells: vec![0u8; HEIGHT*WIDTH],
-            width: WIDTH,
-            height: HEIGHT,
+            cells: vec![0u8; height*width],
+            width: width,
+            height: height,
             updates: 0,
             updated: true,
         }
     }
-}
 
-pub fn display_cells_to_buf(cells: Vec<u8>) -> Vec<u8> {
-    let mut buf = Vec::<u8>::with_capacity(HEIGHT * WIDTH);
-    for y in 0..HEIGHT {
-        for x in 0..WIDTH / 8 {
-            for bit in 0..8 {
-                if ((cells[y*(WIDTH / 8) + x] >> (7 - bit)) & 0x1) == 1 {
-                    buf.push(1);
-                } else {
-                    buf.push(0);
-                }
-            }
-        }
-    }
-    buf
-}
-
-
-impl Display {
     fn clear(&mut self) {
         for y in 0..self.height {
             for x in 0..self.width / 8 {
@@ -204,7 +186,7 @@ pub struct Cpu {
 impl Default for Cpu {
     fn default() -> Self {
         Self {
-            display: Display::default(),
+            display: Display::new(HEIGHT, WIDTH),
             keyboard: Keyboard::default(),
             dt: Timer::new(),
             st: Timer::new(),
