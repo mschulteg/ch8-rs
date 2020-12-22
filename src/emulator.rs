@@ -60,7 +60,7 @@ impl Emulator {
         window.limit_update_rate(None);
 
         let (tx_keys, rx_keys) = mpsc::sync_channel::<[VKey; 16]>(1);
-        let (tx_disp, rx_disp) = mpsc::sync_channel::<[[u8; WIDTH / 8]; HEIGHT]>(1);
+        let (tx_disp, rx_disp) = mpsc::sync_channel::<Vec<u8>>(1);
 
         let mut perf_io = PerfLimiter::new(self.fps_limit);
         let mut perf_cpu = PerfLimiter::new(self.ips_limit);
@@ -79,7 +79,7 @@ impl Emulator {
 
             //this variant skips frames
             if skip_frames {
-                match tx_disp.try_send(cpu.display.cells) {
+                match tx_disp.try_send(cpu.display.cells.clone()) {
                     Ok(..) => {}
                     Err(TrySendError::Full(..)) => {} //skipped frame
                     Err(TrySendError::Disconnected(..)) => break,
@@ -87,7 +87,7 @@ impl Emulator {
             } else {
                 if cpu.display.updated {
                     cpu.display.updated = false;
-                    match tx_disp.send(cpu.display.cells) {
+                    match tx_disp.send(cpu.display.cells.clone()) {
                         Ok(..) => {}
                         Err(SendError(..)) => break,
                     }

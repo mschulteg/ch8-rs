@@ -71,7 +71,9 @@ impl Default for Keyboard {
 pub struct Display {
     // x: 0 - 63 pixels or 0-7 bytes
     // y: 0 - 31 bytes
-    pub cells: [[u8; WIDTH / 8]; HEIGHT],
+    pub cells: Vec<u8>,
+    pub width: usize,
+    pub height: usize,
     pub updates: u64,
     pub updated: bool,
 }
@@ -79,19 +81,38 @@ pub struct Display {
 impl Default for Display {
     fn default() -> Self {
         Self {
-            cells: [[0u8; WIDTH / 8]; HEIGHT],
+            cells: vec![0u8; HEIGHT*WIDTH],
+            width: WIDTH,
+            height: HEIGHT,
             updates: 0,
             updated: true,
         }
     }
 }
 
-pub fn display_cells_to_buf(cells: [[u8; WIDTH / 8]; HEIGHT]) -> Vec<u8> {
-    let mut buf = Vec::<u8>::with_capacity(WIDTH * HEIGHT);
+pub fn display_cells_to_buf(cells: Vec<u8>) -> Vec<u8> {
+    let mut buf = Vec::<u8>::with_capacity(HEIGHT * WIDTH);
     for y in 0..HEIGHT {
         for x in 0..WIDTH / 8 {
             for bit in 0..8 {
-                if ((cells[y][x] >> (7 - bit)) & 0x1) == 1 {
+                if ((cells[y*(WIDTH / 8) + x] >> (7 - bit)) & 0x1) == 1 {
+                    buf.push(1);
+                } else {
+                    buf.push(0);
+                }
+            }
+        }
+    }
+    buf
+}
+
+pub fn display_cells_to_buf2(disp: Display) -> Vec<u8> {
+    let cells = disp.cells;
+    let mut buf = Vec::<u8>::with_capacity(disp.height * disp.width);
+    for y in 0..disp.height {
+        for x in 0..disp.width / 8 {
+            for bit in 0..8 {
+                if ((cells[y*(disp.width / 8) + x] >> (7 - bit)) & 0x1) == 1 {
                     buf.push(1);
                 } else {
                     buf.push(0);
@@ -104,9 +125,9 @@ pub fn display_cells_to_buf(cells: [[u8; WIDTH / 8]; HEIGHT]) -> Vec<u8> {
 
 impl Display {
     fn clear(&mut self) {
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH / 8 {
-                self.cells[y][x] = 0;
+        for y in 0..self.height {
+            for x in 0..self.width / 8 {
+                self.cells[y*(self.width / 8) + x] = 0;
             }
         }
         self.updates += 1
@@ -114,8 +135,8 @@ impl Display {
 
     fn write_sprite(&mut self, sprite: &[u8], x: u8, y: u8) -> bool {
         let mut collision = false;
-        let x = x % WIDTH as u8;
-        let y = y % HEIGHT as u8;
+        let x = x % self.width as u8;
+        let y = y % self.height as u8;
         for i in 0..sprite.len() {
             let y_roll = ((y as usize + i) % HEIGHT) as u8;
             let cur_val = self.get_byte(x, y_roll);
@@ -133,8 +154,10 @@ impl Display {
     fn get_byte(&mut self, x: u8, y: u8) -> u8 {
         let offs_bytes = x as usize / 8;
         let offs_bits = x as usize % 8;
-        let line = &self.cells[y as usize];
-        let word = (line[offs_bytes] as u16) << 8 | line[(offs_bytes + 1) % (WIDTH / 8)] as u16;
+        let line_offs = y as usize * self.width / 8;
+
+
+        let word = (self.cells[line_offs + offs_bytes] as u16) << 8 | self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] as u16;
         let res = ((word >> (8 - offs_bits)) & 0xFF) as u8;
         res
     }
@@ -142,13 +165,13 @@ impl Display {
     fn set_byte(&mut self, x: u8, y: u8, val: u8) {
         let offs_bytes = x as usize / 8;
         let offs_bits = x as usize % 8;
-        let line = &mut self.cells[y as usize];
+        let line_offs = y as usize * self.width / 8;
 
-        let mut word = (line[offs_bytes] as u16) << 8 | line[(offs_bytes + 1) % (WIDTH / 8)] as u16;
+        let mut word = (self.cells[line_offs + offs_bytes] as u16) << 8 | self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] as u16;
         word &= !(0xFF << (8 - offs_bits));
         word |= (val as u16) << (8 - offs_bits);
-        line[offs_bytes] = ((word >> 8) & 0xFF) as u8;
-        line[(offs_bytes + 1) % 8] = (word & 0xFF) as u8;
+        self.cells[line_offs + offs_bytes] = ((word >> 8) & 0xFF) as u8;
+        self.cells[line_offs + (offs_bytes + 1) % 8] = (word & 0xFF) as u8;
     }
 
     fn std_sprites(&self) -> [u8; 80] {
