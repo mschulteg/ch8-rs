@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, SendError, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, SendError, TryRecvError, TrySendError, RecvError};
 use std::thread;
 
 use super::cpu::{display_cells_to_buf, Cpu, VKey, WIDTH, HEIGHT};
@@ -61,6 +61,7 @@ impl Emulator {
 
         let (tx_keys, rx_keys) = mpsc::sync_channel::<[VKey; 16]>(1);
         let (tx_disp, rx_disp) = mpsc::sync_channel::<Vec<u8>>(1);
+        let (tx_disp_notify, rx_disp_notify) = mpsc::sync_channel::<()>(1);
 
         let mut perf_io = PerfLimiter::new(self.fps_limit);
         let mut perf_cpu = PerfLimiter::new(self.ips_limit);
@@ -79,8 +80,13 @@ impl Emulator {
 
             //this variant skips frames
             if skip_frames {
-                match tx_disp.try_send(cpu.display.cells.clone()) {
-                    Ok(..) => {}
+                match tx_disp_notify.try_send(()) {
+                    Ok(..) => {
+                        match tx_disp.send(cpu.display.to_buf()) {
+                            Ok(..) => {}
+                            Err(SendError(..)) => {break;}
+                        }
+                    }
                     Err(TrySendError::Full(..)) => {} //skipped frame
                     Err(TrySendError::Disconnected(..)) => break,
                 }
@@ -115,13 +121,17 @@ impl Emulator {
                 Err(TrySendError::Disconnected(..)) => break,
             }
 
-            match rx_disp.try_recv() {
-                Ok(display_cells) => {
-                    let display_data = display_cells_to_buf(display_cells);
-                    for (disp, b) in display_data.iter().zip(buffer.iter_mut()) {
-                        *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
+            match rx_disp_notify.try_recv() {
+                Ok(..) => {
+                    match rx_disp.recv() {
+                        Ok(display_buf) => {
+                                for (disp, b) in display_buf.iter().zip(buffer.iter_mut()) {
+                                    *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
+                                }
+                                window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
+                            }
+                        Err(RecvError) => break,
                     }
-                    window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
                 }
                 Err(TryRecvError::Empty) => {
                     window.update();

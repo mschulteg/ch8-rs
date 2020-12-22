@@ -106,22 +106,6 @@ pub fn display_cells_to_buf(cells: Vec<u8>) -> Vec<u8> {
     buf
 }
 
-pub fn display_cells_to_buf2(disp: Display) -> Vec<u8> {
-    let cells = disp.cells;
-    let mut buf = Vec::<u8>::with_capacity(disp.height * disp.width);
-    for y in 0..disp.height {
-        for x in 0..disp.width / 8 {
-            for bit in 0..8 {
-                if ((cells[y*(disp.width / 8) + x] >> (7 - bit)) & 0x1) == 1 {
-                    buf.push(1);
-                } else {
-                    buf.push(0);
-                }
-            }
-        }
-    }
-    buf
-}
 
 impl Display {
     fn clear(&mut self) {
@@ -131,6 +115,23 @@ impl Display {
             }
         }
         self.updates += 1
+    }
+
+    pub fn to_buf(&self) -> Vec<u8> {
+        let cells = &self.cells;
+        let mut buf = Vec::<u8>::with_capacity(self.height * self.width);
+        for y in 0..self.height {
+            for x in 0..self.width / 8 {
+                for bit in 0..8 {
+                    if ((cells[y*(self.width / 8) + x] >> (7 - bit)) & 0x1) == 1 {
+                        buf.push(1);
+                    } else {
+                        buf.push(0);
+                    }
+                }
+            }
+        }
+        buf
     }
 
     fn write_sprite(&mut self, sprite: &[u8], x: u8, y: u8) -> bool {
