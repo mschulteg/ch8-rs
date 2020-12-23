@@ -1,12 +1,10 @@
-use std::sync::mpsc::{self, SendError, TryRecvError, TrySendError, RecvError};
+use std::sync::mpsc::{self, RecvError, SendError, TryRecvError, TrySendError};
 use std::thread;
 
-use super::cpu::{Cpu, VKey, WIDTH, HEIGHT};
+use super::cpu::{Cpu, VKey, HEIGHT, WIDTH};
 use super::perf::PerfLimiter;
 
 use minifb::{Key, Scale, Window, WindowOptions};
-
-
 
 #[derive(Copy, Clone)]
 pub struct Emulator {
@@ -81,12 +79,23 @@ impl Emulator {
 
             //this variant skips frames
             if skip_frames {
+                // && cpu.display.updated{
+                // The cpu.display.updated check can be added to increase IPS.
+                // but it increases flickering due to short inbetween states
+                // not being skipped.
                 match tx_disp_notify.try_send(()) {
                     Ok(..) => {
-                        match tx_disp.send((cpu.display.to_buf(), cpu.display.height, cpu.display.width)) {
+                        match tx_disp.send((
+                            cpu.display.to_buf(),
+                            cpu.display.height,
+                            cpu.display.width,
+                        )) {
                             Ok(..) => {}
-                            Err(SendError(..)) => {break;}
+                            Err(SendError(..)) => {
+                                break;
+                            }
                         }
+                        //cpu.display.updated = false;
                     }
                     Err(TrySendError::Full(..)) => {} //skipped frame
                     Err(TrySendError::Disconnected(..)) => break,
@@ -94,7 +103,11 @@ impl Emulator {
             } else {
                 if cpu.display.updated {
                     cpu.display.updated = false;
-                    match tx_disp.send((cpu.display.cells.clone(), cpu.display.height, cpu.display.width)) {
+                    match tx_disp.send((
+                        cpu.display.cells.clone(),
+                        cpu.display.height,
+                        cpu.display.width,
+                    )) {
                         Ok(..) => {}
                         Err(SendError(..)) => break,
                     }
@@ -109,7 +122,7 @@ impl Emulator {
                 Err(TryRecvError::Disconnected) => break,
             }
             perf_cpu.wait();
-            if !ticker_tps.wait_nonblocking() && debug >= 1{
+            if !ticker_tps.wait_nonblocking() && debug >= 1 {
                 println!("tps: {}", perf_cpu.get_fps());
             }
         });
@@ -126,13 +139,11 @@ impl Emulator {
                 Ok(..) => {
                     match rx_disp.recv() {
                         Ok((display_buf, height, width)) => {
-                                for (disp, b) in display_buf.iter().zip(buffer.iter_mut()) {
-                                    *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
-                                }
-                                buffer[127] = 0x00FFFFFF;
-                                //println!("{} {} {}", display_buf.len(), height, width);
-                                window.update_with_buffer(&buffer, width, height).unwrap();
+                            for (disp, b) in display_buf.iter().zip(buffer.iter_mut()) {
+                                *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
                             }
+                            window.update_with_buffer(&buffer, width, height).unwrap();
+                        }
                         Err(RecvError) => break,
                     }
                 }
@@ -142,7 +153,7 @@ impl Emulator {
                 Err(TryRecvError::Disconnected) => break,
             }
             perf_io.wait();
-            if !ticker_fps.wait_nonblocking() && debug >= 1{
+            if !ticker_fps.wait_nonblocking() && debug >= 1 {
                 println!("fps: {}", perf_io.get_fps());
             }
         }
