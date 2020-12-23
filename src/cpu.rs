@@ -1,6 +1,6 @@
+use std::convert::TryInto;
 use std::fmt;
 use std::time::Instant;
-use std::convert::TryInto;
 
 pub const WIDTH: usize = 64;
 pub const HEIGHT: usize = 32;
@@ -78,6 +78,7 @@ pub struct Display {
     pub updates: u64,
     pub updated: bool,
     pub extended: bool,
+    pub colors: [u32; 4],
 }
 
 impl Display {
@@ -89,6 +90,7 @@ impl Display {
             updates: 0,
             updated: true,
             extended: false,
+            colors: [0x00AA4400, 0, 0x00FFAA00, 0],
         }
     }
 
@@ -102,7 +104,6 @@ impl Display {
         }
         self.extended = ext;
         self.cells = vec![0u8; self.height * self.width];
-        println!("EXTENDED IS SET TO {}", self.extended);
     }
 
     fn flag_updated(&mut self) {
@@ -147,17 +148,15 @@ impl Display {
         self.flag_updated();
     }
 
-    pub fn to_buf(&self) -> Vec<u8> {
+    pub fn to_buf(&self) -> Vec<u32> {
         let cells = &self.cells;
-        let mut buf = Vec::<u8>::with_capacity(self.height * self.width);
+        let mut buf = Vec::<u32>::with_capacity(self.height * self.width);
         for y in 0..self.height {
             for x in 0..self.width / 8 {
                 for bit in 0..8 {
-                    if ((cells[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) == 1 {
-                        buf.push(1);
-                    } else {
-                        buf.push(0);
-                    }
+                    let mut bitplane = 0;
+                    bitplane |= ((cells[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) << 1;
+                    buf.push(self.colors[bitplane as usize]);
                 }
             }
         }
@@ -490,9 +489,13 @@ impl Cpu {
                 if nibbles[3] == 0 {
                     let end = start + 32 as usize;
                     let sprites = &self.memory[start..end];
-                    let collision = self.display.write_sprite16(sprites.try_into().unwrap(), self.v[x], self.v[y]);
+                    let collision = self.display.write_sprite16(
+                        sprites.try_into().unwrap(),
+                        self.v[x],
+                        self.v[y],
+                    );
                     self.v[0xF] = if collision { 1 } else { 0 };
-                }else {
+                } else {
                     let end = start + nibbles[3] as usize;
                     let sprites = &self.memory[start..end];
                     let collision = self.display.write_sprite(sprites, self.v[x], self.v[y]);

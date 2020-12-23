@@ -59,7 +59,7 @@ impl Emulator {
         window.limit_update_rate(None);
 
         let (tx_keys, rx_keys) = mpsc::sync_channel::<[VKey; 16]>(1);
-        let (tx_disp, rx_disp) = mpsc::sync_channel::<(Vec<u8>, usize, usize)>(1);
+        let (tx_disp, rx_disp) = mpsc::sync_channel::<(Vec<u32>, usize, usize)>(1);
         let (tx_disp_notify, rx_disp_notify) = mpsc::sync_channel::<()>(1);
 
         let mut perf_io = PerfLimiter::new(self.fps_limit);
@@ -104,7 +104,7 @@ impl Emulator {
                 if cpu.display.updated {
                     cpu.display.updated = false;
                     match tx_disp.send((
-                        cpu.display.cells.clone(),
+                        cpu.display.to_buf(),
                         cpu.display.height,
                         cpu.display.width,
                     )) {
@@ -136,17 +136,13 @@ impl Emulator {
             }
 
             match rx_disp_notify.try_recv() {
-                Ok(..) => {
-                    match rx_disp.recv() {
-                        Ok((display_buf, height, width)) => {
-                            for (disp, b) in display_buf.iter().zip(buffer.iter_mut()) {
-                                *b = *disp as u32 * 0x00FFAA00 + (1 - *disp) as u32 * 0x00AA4400;
-                            }
-                            window.update_with_buffer(&buffer, width, height).unwrap();
-                        }
-                        Err(RecvError) => break,
+                Ok(..) => match rx_disp.recv() {
+                    Ok((display_buf, height, width)) => {
+                        buffer[..height * width].copy_from_slice(&display_buf[..]);
+                        window.update_with_buffer(&buffer, width, height).unwrap();
                     }
-                }
+                    Err(RecvError) => break,
+                },
                 Err(TryRecvError::Empty) => {
                     window.update();
                 }
