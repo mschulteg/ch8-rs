@@ -69,46 +69,19 @@ impl Default for Keyboard {
     }
 }
 
-pub struct Display {
-    // x: 0 - 63 pixels or 0-7 bytes
-    // y: 0 - 31 bytes
-    pub cells: Vec<u8>,
+pub struct Plane {
+    cells: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    pub updates: u64,
-    pub updated: bool,
-    pub extended: bool,
-    pub colors: [u32; 4],
 }
 
-impl Display {
+impl Plane {
     fn new(height: usize, width: usize) -> Self {
-        Self {
+        Plane {
             cells: vec![0u8; height * width],
-            width: width,
-            height: height,
-            updates: 0,
-            updated: true,
-            extended: false,
-            colors: [0x00AA4400, 0, 0x00FFAA00, 0],
+            width,
+            height,
         }
-    }
-
-    fn set_extended(&mut self, ext: bool) {
-        if ext {
-            self.height = HEIGHT * 2;
-            self.width = WIDTH * 2;
-        } else {
-            self.height = HEIGHT;
-            self.width = WIDTH;
-        }
-        self.extended = ext;
-        self.cells = vec![0u8; self.height * self.width];
-    }
-
-    fn flag_updated(&mut self) {
-        self.updated = true;
-        self.updates += 1;
     }
 
     fn scroll_down(&mut self, n: u8) {
@@ -116,7 +89,13 @@ impl Display {
         for pixel_byte in self.cells[0..n as usize * self.width / 8].iter_mut() {
             *pixel_byte = 0;
         }
-        self.flag_updated();
+    }
+
+    fn scroll_up(&mut self, n: u8) {
+        for pixel_byte in self.cells[0..n as usize * self.width / 8].iter_mut() {
+            *pixel_byte = 0;
+        }
+        self.cells.rotate_left(n as usize * self.width / 8);
     }
 
     fn scroll_right(&mut self) {
@@ -126,7 +105,6 @@ impl Display {
             *val = (*val >> 4) | (last_nibble << 4);
             last_nibble = tmp;
         }
-        self.flag_updated();
     }
 
     fn scroll_left(&mut self) {
@@ -136,7 +114,6 @@ impl Display {
             *val = (*val << 4) | last_nibble;
             last_nibble = tmp;
         }
-        self.flag_updated();
     }
 
     fn clear(&mut self) {
@@ -145,22 +122,6 @@ impl Display {
                 self.cells[y * (self.width / 8) + x] = 0;
             }
         }
-        self.flag_updated();
-    }
-
-    pub fn to_buf(&self) -> Vec<u32> {
-        let cells = &self.cells;
-        let mut buf = Vec::<u32>::with_capacity(self.height * self.width);
-        for y in 0..self.height {
-            for x in 0..self.width / 8 {
-                for bit in 0..8 {
-                    let mut bitplane = 0;
-                    bitplane |= ((cells[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) << 1;
-                    buf.push(self.colors[bitplane as usize]);
-                }
-            }
-        }
-        buf
     }
 
     fn write_sprite(&mut self, sprite: &[u8], x: u8, y: u8) -> bool {
@@ -177,7 +138,6 @@ impl Display {
                 collision = true;
             }
         }
-        self.flag_updated();
         collision
     }
 
@@ -218,6 +178,163 @@ impl Display {
         word |= (val as u16) << (8 - offs_bits);
         self.cells[line_offs + offs_bytes] = ((word >> 8) & 0xFF) as u8;
         self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] = (word & 0xFF) as u8;
+    }
+}
+
+pub struct Display {
+    // x: 0 - 63 pixels or 0-7 bytes
+    // y: 0 - 31 bytes
+    //pub cells: Vec<u8>,
+    pub planes: Vec<Plane>,
+    pub width: usize,
+    pub height: usize,
+    pub updates: u64,
+    pub updated: bool,
+    pub extended: bool,
+    pub colors: [u32; 4],
+    pub active_planes: u8,
+}
+
+impl Display {
+    fn new(height: usize, width: usize) -> Self {
+        Self {
+            planes: vec![Plane::new(height, width), Plane::new(height, width)],
+            width: width,
+            height: height,
+            updates: 0,
+            updated: true,
+            extended: false,
+            colors: [0x00AA4400, 0x00FFAA00, 0x00AAAAAA, 0x00000000],
+            active_planes: 0x1,
+        }
+    }
+
+    fn plane_is_active(&self, index: u8) -> bool {
+        (self.active_planes >> index) & 0x1 == 1
+    }
+
+    fn set_extended(&mut self, ext: bool) {
+        if ext {
+            self.height = HEIGHT * 2;
+            self.width = WIDTH * 2;
+        } else {
+            self.height = HEIGHT;
+            self.width = WIDTH;
+        }
+        self.extended = ext;
+        self.planes = vec![
+            Plane::new(self.height, self.width),
+            Plane::new(self.height, self.width),
+        ];
+    }
+
+    fn flag_updated(&mut self) {
+        self.updated = true;
+        self.updates += 1;
+    }
+
+    pub fn to_buf(&self) -> Vec<u32> {
+        let cells1 = &self.planes[0].cells;
+        let cells2 = &self.planes[1].cells;
+        let mut buf = Vec::<u32>::with_capacity(self.height * self.width);
+        for y in 0..self.height {
+            for x in 0..self.width / 8 {
+                for bit in 0..8 {
+                    let mut bitplane = 0;
+                    bitplane |= ((cells1[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) << 0;
+                    bitplane |= ((cells2[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) << 1;
+                    buf.push(self.colors[bitplane as usize]);
+                }
+            }
+        }
+        buf
+    }
+
+    fn scroll_down(&mut self, n: u8) {
+        for (i, plane) in self.planes.iter_mut().enumerate() {
+            if (self.active_planes >> i as u8) & 0x1 == 1 {
+                plane.scroll_down(n);
+            }
+        }
+        self.flag_updated();
+    }
+
+    fn scroll_up(&mut self, n: u8) {
+        for (i, plane) in self.planes.iter_mut().enumerate() {
+            if (self.active_planes >> i as u8) & 0x1 == 1 {
+                plane.scroll_up(n);
+            }
+        }
+        self.flag_updated();
+    }
+
+    fn scroll_right(&mut self) {
+        for (i, plane) in self.planes.iter_mut().enumerate() {
+            if (self.active_planes >> i as u8) & 0x1 == 1 {
+                plane.scroll_right();
+            }
+        }
+        self.flag_updated();
+    }
+
+    fn scroll_left(&mut self) {
+        for (i, plane) in self.planes.iter_mut().enumerate() {
+            if (self.active_planes >> i as u8) & 0x1 == 1 {
+                plane.scroll_left();
+            }
+        }
+        self.flag_updated();
+    }
+
+    fn clear(&mut self) {
+        for (i, plane) in self.planes.iter_mut().enumerate() {
+            if (self.active_planes >> i as u8) & 0x1 == 1 {
+                plane.clear();
+            }
+        }
+        self.flag_updated();
+    }
+
+    fn write_sprite(&mut self, sprite: &[u8], x: u8, y: u8) -> bool {
+        let mut collision = false;
+        match self.active_planes {
+            0x3 => {
+                let length = sprite.len();
+                collision |= self.planes[0].write_sprite(&sprite[..length / 2], x, y);
+                collision |= self.planes[1].write_sprite(&sprite[length / 2..], x, y);
+            }
+            _ => {
+                for (i, plane) in self.planes.iter_mut().enumerate() {
+                    if (self.active_planes >> i as u8) & 0x1 == 1 {
+                        collision |= plane.write_sprite(sprite, x, y);
+                    }
+                }
+            }
+        }
+        self.flag_updated();
+        collision
+    }
+
+    fn write_sprite16(&mut self, sprite: &[u8], x: u8, y: u8) -> bool {
+        let mut collision = false;
+        match self.active_planes {
+            0x3 => {
+                let length = sprite.len();
+                collision |=
+                    self.planes[0].write_sprite16(&sprite[..length / 2].try_into().unwrap(), x, y);
+                collision |=
+                    self.planes[1].write_sprite16(&sprite[length / 2..].try_into().unwrap(), x, y);
+            }
+            _ => {
+                for (i, plane) in self.planes.iter_mut().enumerate() {
+                    if (self.active_planes >> i as u8) & 0x1 == 1 {
+                        collision |= plane.write_sprite16(sprite.try_into().unwrap(), x, y);
+                    }
+                }
+            }
+        }
+        self.flag_updated();
+        collision
     }
 
     fn std_sprites(&self) -> [u8; 80] {
@@ -309,6 +426,14 @@ impl Cpu {
         read_memory(&self.memory, self.pc)
     }
 
+    pub fn skip_instruction(&mut self) {
+        if self.next_instruction() == 0xF000 {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
     pub fn tick(&mut self) -> u16 {
         let instr = self.next_instruction();
         self.process_instruction(instr);
@@ -330,9 +455,13 @@ impl Cpu {
         let kk: u8 = (instr & 0xFF) as u8;
 
         match (nibbles[0], nibbles[1], nibbles[2], nibbles[3]) {
-            (0x0, _, 0xC, _) => {
-                // Scroll display N lines down
+            (0x0, 0x0, 0xC, _) => {
+                // 0x00CN Scroll display N lines down
                 self.display.scroll_down(nibbles[3]);
+            }
+            (0x0, 0x0, 0xD, _) => {
+                // 0x00DN - Scroll display N lines up
+                self.display.scroll_up(nibbles[3]);
             }
             (0x0, _, 0xE, 0x0) => {
                 self.display.clear();
@@ -341,23 +470,23 @@ impl Cpu {
                 self.pc = self.stack[self.sp as usize];
                 self.sp = self.sp - 1;
             }
-            (0x0, _, 0xF, 0xB) => {
+            (0x0, 0x0, 0xF, 0xB) => {
                 // Scroll display 4 pixels right
                 self.display.scroll_right();
             }
-            (0x0, _, 0xF, 0xC) => {
+            (0x0, 0x0, 0xF, 0xC) => {
                 // Scroll display 4 pixels left
                 self.display.scroll_left();
             }
-            (0x0, _, 0xF, 0xD) => {
+            (0x0, 0x0, 0xF, 0xD) => {
                 // Exit CHIP interpreter
                 println!("TODO: EXIT");
             }
-            (0x0, _, 0xF, 0xE) => {
+            (0x0, 0x0, 0xF, 0xE) => {
                 // Disable extended screen mode
                 self.display.set_extended(false);
             }
-            (0x0, _, 0xF, 0xF) => {
+            (0x0, 0x0, 0xF, 0xF) => {
                 // Enable extended screen mode
                 self.display.set_extended(true);
             }
@@ -376,23 +505,36 @@ impl Cpu {
             (0x3, ..) => {
                 // SE Vx, byte
                 if self.v[x] == kk {
-                    self.pc = self.pc + 4;
-                    return;
+                    self.skip_instruction();
                 }
             }
             (0x4, ..) => {
                 // SNE Vx, byte
                 if self.v[x] != kk {
-                    self.pc = self.pc + 4;
-                    return;
+                    self.skip_instruction();
                 }
             }
-            (0x5, ..) => {
+            (0x5, _, _, 0) => {
                 // 5xy0 - SE Vx, Vy
                 if self.v[x] == self.v[y] {
-                    self.pc = self.pc + 4;
-                    return;
+                    self.skip_instruction();
                 }
+            }
+            (0x5, _, _, 2) => {
+                // 5xy2 - LD [I], Vx-Vy
+                let i = self.i as usize;
+                let range = y - x;
+                let memslice = &mut self.memory[i..i + range + 1];
+                memslice.copy_from_slice(&self.v[x..y + 1]);
+                //self.i += x as u16 + 1;
+            }
+            (0x5, _, _, 3) => {
+                // 5xy3 - LD Vx-Vy, [I]
+                let i = self.i as usize;
+                let range = y - x;
+                let memslice = &self.memory[i..i + range + 1];
+                self.v[x..y + 1].copy_from_slice(memslice);
+                //self.i += x as u16 + 1;
             }
             (0x6, ..) => {
                 // 6xkk - LD Vx, byte
@@ -466,8 +608,7 @@ impl Cpu {
             (0x9, ..) => {
                 // 9xy0 - SNE Vx, Vy
                 if self.v[x] != self.v[y] {
-                    self.pc = self.pc + 4;
-                    return;
+                    self.skip_instruction();
                 }
             }
             (0xA, ..) => {
@@ -487,16 +628,21 @@ impl Cpu {
                 // Dxyn - DRW Vx, Vy, nibble
                 let start = self.i as usize;
                 if nibbles[3] == 0 {
-                    let end = start + 32 as usize;
+                    let end = if self.display.active_planes == 0x3 {
+                        start + 64 as usize
+                    } else {
+                        start + 32 as usize
+                    };
                     let sprites = &self.memory[start..end];
-                    let collision = self.display.write_sprite16(
-                        sprites.try_into().unwrap(),
-                        self.v[x],
-                        self.v[y],
-                    );
+                    let collision = self.display.write_sprite16(sprites, self.v[x], self.v[y]);
                     self.v[0xF] = if collision { 1 } else { 0 };
                 } else {
-                    let end = start + nibbles[3] as usize;
+                    let end = if self.display.active_planes == 0x3 {
+                        start + nibbles[3] as usize * 2
+                    } else {
+                        start + nibbles[3] as usize
+                    };
+
                     let sprites = &self.memory[start..end];
                     let collision = self.display.write_sprite(sprites, self.v[x], self.v[y]);
                     self.v[0xF] = if collision { 1 } else { 0 };
@@ -505,16 +651,27 @@ impl Cpu {
             (0xE, _, 0x9, 0xE) => {
                 // Ex9E - SKP Vx
                 if self.keyboard.keys[self.v[x] as usize] == VKey::Down {
-                    self.pc = self.pc + 4;
-                    return;
+                    self.skip_instruction();
                 }
             }
             (0xE, _, 0xA, 0x1) => {
                 // ExA1 - SKNP Vx
                 if self.keyboard.keys[self.v[x] as usize] == VKey::Up {
-                    self.pc = self.pc + 4;
-                    return;
+                    self.skip_instruction();
                 }
+            }
+            (0xF, 0x0, 0x0, 0x0) => {
+                // F000 NNNN - load NNNN to i
+                self.pc += 2;
+                self.i = read_memory(&self.memory, self.pc);
+            }
+            (0xF, _, 0x0, 0x1) => {
+                // 0xFN01 Select drawing plane by bitmask (0 <= n <= 3)
+                self.display.active_planes = nibbles[1];
+            }
+            (0xF, 0x0, 0x0, 0x2) => {
+                // 0xF002 - Store 16 bytes starting at i in the audio pattern buffer.
+                // NOT YET IMPLEMENTED
             }
             (0xF, _, 0x0, 0x7) => {
                 // Fx07 - LD Vx, DT
