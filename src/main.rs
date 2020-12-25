@@ -43,6 +43,15 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("ipf-limit")
+                .long("ipf-limit")
+                .value_name("IPF")
+                .help("Limits instructions per frame")
+                .takes_value(true)
+                .conflicts_with("ips-limit")
+                .requires("fps-limit")
+        )
+        .arg(
             Arg::with_name("no-skip-frames")
                 .long("no-skip-frames")
                 .help("Do not skip frames - Frames are skipped by default")
@@ -58,8 +67,15 @@ fn main() {
     let path = matches.value_of("rom_path").expect("No file given");
     let debug = matches.occurrences_of("debug");
     let fps_limit = matches.value_of("fps-limit").and_then(|string| string.parse::<f64>().ok());
-    let ips_limit = matches.value_of("ips-limit").and_then(|string| string.parse::<f64>().ok());
+    let mut ips_limit = matches.value_of("ips-limit").and_then(|string| string.parse::<f64>().ok());
+    let ipf_limit = matches.value_of("ipf-limit").and_then(|string| string.parse::<f64>().ok());
     let skip_frames = !matches.is_present("no-skip-frames");
+
+    if let Some(ipf_limit) = ipf_limit {
+        if let Some(fps_limit) = fps_limit {
+            ips_limit = Some(fps_limit * ipf_limit);
+        }
+    }
 
     let f = File::open(path).unwrap();
     let mut buf_reader = BufReader::new(f);
