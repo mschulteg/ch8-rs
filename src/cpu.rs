@@ -4,6 +4,7 @@ use std::time::Instant;
 
 pub const WIDTH: usize = 64;
 pub const HEIGHT: usize = 32;
+pub const MEMSIZE: usize = 65536;
 
 pub struct Timer {
     start: Instant,
@@ -367,7 +368,7 @@ pub struct Cpu {
     pub keyboard: Keyboard,
     pub dt: Timer,
     pub st: Timer,
-    pub memory: [u8; 4096],
+    pub memory: [u8; MEMSIZE],
     pub v: [u8; 16],
     pub pc: u16,
     pub sp: u8,
@@ -384,7 +385,7 @@ impl Default for Cpu {
             keyboard: Keyboard::default(),
             dt: Timer::new(),
             st: Timer::new(),
-            memory: [0u8; 4096],
+            memory: [0u8; MEMSIZE],
             v: [0u8; 16],
             pc: 0x200,
             sp: 0,
@@ -427,9 +428,8 @@ impl Cpu {
     }
 
     pub fn skip_instruction(&mut self) {
+        self.pc += 2;
         if self.next_instruction() == 0xF000 {
-            self.pc += 4;
-        } else {
             self.pc += 2;
         }
     }
@@ -584,8 +584,11 @@ impl Cpu {
             }
             (0x8, _, _, 0x6) => {
                 // 8xy6 - SHR Vx {, Vy}
-                let vf = self.v[x] & 0x1;
-                self.v[x] = self.v[x] >> 1;
+                // quirk - original
+                //let vf = self.v[x] & 0x1;
+                //self.v[x] = self.v[x] >> 1;
+                let vf = self.v[y] & 0x1;
+                self.v[x] = self.v[y] >> 1;
                 self.v[0xF] = vf;
             }
             (0x8, _, _, 0x7) => {
@@ -602,8 +605,12 @@ impl Cpu {
             }
             (0x8, _, _, 0xE) => {
                 // 8xyE - SHL Vx {, Vy}
-                self.v[0xF] = self.v[x] >> 7 & 0x1;
-                self.v[x] = self.v[x] << 1;
+
+                // quirk - original
+                //self.v[0xF] = self.v[x] >> 7 & 0x1;
+                //self.v[x] = self.v[x] << 1;
+                self.v[0xF] = self.v[y] >> 7 & 0x1;
+                self.v[x] = self.v[y] << 1;
             }
             (0x9, ..) => {
                 // 9xy0 - SNE Vx, Vy
@@ -617,7 +624,9 @@ impl Cpu {
             }
             (0xB, ..) => {
                 // Bnnn - JP V0, addr
+                //self.pc = nnn + self.v[x] as u16;
                 self.pc = nnn + self.v[0] as u16;
+                return;
             }
             (0xC, ..) => {
                 // Cxkk - RND Vx, byte
@@ -746,12 +755,12 @@ impl Cpu {
                 self.v[0..x + 1].copy_from_slice(memslice);
             }
 
-            _ => panic!("unknown opcode"),
+            _ => panic!("unknown opcode: {}", instr),
         }
         self.pc += 2;
     }
 }
 
-fn read_memory(mem: &[u8; 4096], addr: u16) -> u16 {
+fn read_memory(mem: &[u8; MEMSIZE], addr: u16) -> u16 {
     (mem[addr as usize] as u16) << 8 | mem[addr as usize + 1] as u16
 }
