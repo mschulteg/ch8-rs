@@ -12,7 +12,7 @@ pub struct Emulator {
     pub fps_limit: Option<f64>,
     pub ips_limit: Option<f64>,
     pub debug: u64,
-    pub colors: Option<[u32; 4]>
+    pub colors: Option<[u32; 4]>,
 }
 
 impl Emulator {
@@ -22,7 +22,7 @@ impl Emulator {
             fps_limit: None,
             ips_limit: None,
             debug: 0,
-            colors: None
+            colors: None,
         }
     }
 
@@ -51,12 +51,7 @@ impl Emulator {
         self
     }
 
-    pub fn run(&self, code: &[u8]) {
-        let mut cpu = Cpu::new(code, 1.0);
-        if let Some(colors) = self.colors {
-            cpu.display.colors = colors;
-        }
-
+    pub fn run(&self, code: Vec<u8>) {
         let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT * 4];
         let mut window_options = WindowOptions::default();
         window_options.scale = Scale::X16;
@@ -78,62 +73,69 @@ impl Emulator {
         let mut ticker_fps = PerfLimiter::new(Some(1.0));
         let debug = self.debug;
         let skip_frames = self.skip_frames;
-        let cpu_thread = thread::spawn(move || loop {
-            if debug >= 2 {
-                println!("{:?}", cpu.keyboard.keys);
-                println!("{:?}", cpu);
-                println!("Instruction: {:#X}", cpu.next_instruction());
+        let colors = self.colors.clone();
+        let cpu_thread = thread::spawn(move || {
+            let mut cpu = Cpu::new(&code[..], 1.0);
+            if let Some(colors) = colors {
+                cpu.display.colors = colors;
             }
+            loop {
+                if debug >= 2 {
+                    println!("{:?}", cpu.keyboard.keys);
+                    println!("{:?}", cpu);
+                    println!("Instruction: {:#X}", cpu.next_instruction());
+                }
 
-            cpu.tick();
+                cpu.tick();
 
-            //this variant skips frames
-            if skip_frames {
-                // && cpu.display.updated{
-                // The cpu.display.updated check can be added to increase IPS.
-                // but it increases flickering due to short inbetween states
-                // not being skipped.
-                match tx_disp_notify.try_send(()) {
-                    Ok(..) => {
+                //this variant skips frames
+                if skip_frames {
+                    // && cpu.display.updated{
+                    // The cpu.display.updated check can be added to increase IPS.
+                    // but it increases flickering due to short inbetween states
+                    // not being skipped.
+                    match tx_disp_notify.try_send(()) {
+                        Ok(..) => {
+                            match tx_disp.send((
+                                cpu.display.to_buf(),
+                                cpu.display.height,
+                                cpu.display.width,
+                            )) {
+                                Ok(..) => {}
+                                Err(SendError(..)) => {
+                                    break;
+                                }
+                            }
+                            //cpu.display.updated = false;
+                        }
+                        Err(TrySendError::Full(..)) => {} //skipped frame
+                        Err(TrySendError::Disconnected(..)) => break,
+                    }
+                } else {
+                    if cpu.display.updated {
+                        cpu.display.updated = false;
                         match tx_disp.send((
                             cpu.display.to_buf(),
                             cpu.display.height,
                             cpu.display.width,
                         )) {
                             Ok(..) => {}
-                            Err(SendError(..)) => {
-                                break;
-                            }
+                            Err(SendError(..)) => break,
                         }
-                        //cpu.display.updated = false;
-                    }
-                    Err(TrySendError::Full(..)) => {} //skipped frame
-                    Err(TrySendError::Disconnected(..)) => break,
-                }
-            } else {
-                if cpu.display.updated {
-                    cpu.display.updated = false;
-                    match tx_disp.send((
-                        cpu.display.to_buf(),
-                        cpu.display.height,
-                        cpu.display.width,
-                    )) {
-                        Ok(..) => {}
-                        Err(SendError(..)) => break,
                     }
                 }
-            }
 
-            match rx_keys.try_recv() {
-                Ok(keys) => {
-                    cpu.keyboard.keys = keys;
+                match rx_keys.try_recv() {
+                    Ok(keys) => {
+                        cpu.keyboard.keys = keys;
+                    }
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => break,
                 }
-                Err(TryRecvError::Empty) => {}
-                Err(TryRecvError::Disconnected) => break,
-            }
-            perf_cpu.wait();
-            if !ticker_tps.wait_nonblocking() && debug >= 1 {
-                println!("tps: {}", perf_cpu.get_fps());
+                perf_cpu.wait();
+                if !ticker_tps.wait_nonblocking() && debug >= 1 {
+                    println!("tps: {}", perf_cpu.get_fps());
+                }
             }
         });
 

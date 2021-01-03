@@ -124,5 +124,5 @@ fn main() {
         .with_colors(colors)
         .with_debug(debug);
 
-    emulator.run(&code[..]);
+    emulator.run(code);
 }
