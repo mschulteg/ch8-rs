@@ -12,6 +12,7 @@ pub struct Emulator {
     pub fps_limit: Option<f64>,
     pub ips_limit: Option<f64>,
     pub debug: u64,
+    pub colors: Option<[u32; 4]>
 }
 
 impl Emulator {
@@ -21,6 +22,7 @@ impl Emulator {
             fps_limit: None,
             ips_limit: None,
             debug: 0,
+            colors: None
         }
     }
 
@@ -39,6 +41,11 @@ impl Emulator {
         self
     }
 
+    pub fn with_colors(mut self, colors: Option<[u32; 4]>) -> Self {
+        self.colors = colors;
+        self
+    }
+
     pub fn with_debug(mut self, debug: u64) -> Self {
         self.debug = debug;
         self
@@ -46,6 +53,9 @@ impl Emulator {
 
     pub fn run(&self, code: &[u8]) {
         let mut cpu = Cpu::new(code, 1.0);
+        if let Some(colors) = self.colors {
+            cpu.display.colors = colors;
+        }
 
         let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT * 4];
         let mut window_options = WindowOptions::default();
