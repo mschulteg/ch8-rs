@@ -1,7 +1,7 @@
 mod cpu;
 mod emulator;
 mod perf;
-
+mod sound;
 use emulator::Emulator;
 
 use std::fs::File;

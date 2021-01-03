@@ -1,6 +1,8 @@
 use std::convert::TryInto;
 use std::fmt;
-use std::time::Instant;
+use std::time::{Instant, Duration};
+
+use super::sound::Sound;
 
 pub const WIDTH: usize = 64;
 pub const HEIGHT: usize = 32;
@@ -46,6 +48,13 @@ impl Timer {
         } else {
             self._reg_value - diff as u8
         };
+    }
+
+    fn time_left(&self) -> Option<Duration> {
+        if self._reg_value == 0 {
+            return None;
+        }
+        Some(Duration::from_secs_f64(self._reg_value as f64 / self.freq_hz))
     }
 }
 
@@ -366,6 +375,8 @@ impl Display {
 pub struct Cpu {
     pub display: Display,
     pub keyboard: Keyboard,
+    pub sound: Sound,
+    pub sound_memory: [i16; 16],
     pub dt: Timer,
     pub st: Timer,
     pub memory: [u8; MEMSIZE],
@@ -383,6 +394,11 @@ impl Default for Cpu {
         Self {
             display: Display::new(HEIGHT, WIDTH),
             keyboard: Keyboard::default(),
+            sound: Sound::new(4000.0),
+            sound_memory: [
+                -10000, 10000, -10000, 10000, -10000, 10000, -10000, 10000, -10000, 10000, -10000,
+                10000, -10000, 10000, -10000, 10000,
+            ],
             dt: Timer::new(),
             st: Timer::new(),
             memory: [0u8; MEMSIZE],
@@ -414,6 +430,7 @@ impl fmt::Debug for Cpu {
 impl Cpu {
     pub fn new(code: &[u8], multi: f64) -> Self {
         let mut cpu = Self::default();
+        cpu.sound.start();
         cpu.dt.multi = multi;
         cpu.st.multi = multi;
         cpu.memory[0..80].copy_from_slice(&cpu.display.std_sprites());
@@ -708,6 +725,9 @@ impl Cpu {
             (0xF, _, 0x1, 0x8) => {
                 // Fx18 - LD ST, Vx
                 self.st.set_reg(self.v[x]);
+                if let Some(duration) = self.st.time_left() {
+                    self.sound.play_samples(&self.sound_memory[..], duration);
+                }
             }
             (0xF, _, 0x1, 0xE) => {
                 // Fx1E - ADD I, Vx
