@@ -376,7 +376,7 @@ pub struct Cpu {
     pub display: Display,
     pub keyboard: Keyboard,
     pub sound: Sound,
-    pub sound_memory: [i16; 16],
+    pub sound_memory: [u8; 16],
     pub dt: Timer,
     pub st: Timer,
     pub memory: [u8; MEMSIZE],
@@ -395,10 +395,7 @@ impl Default for Cpu {
             display: Display::new(HEIGHT, WIDTH),
             keyboard: Keyboard::default(),
             sound: Sound::new(4000.0),
-            sound_memory: [
-                -10000, 10000, -10000, 10000, -10000, 10000, -10000, 10000, -10000, 10000, -10000,
-                10000, -10000, 10000, -10000, 10000,
-            ],
+            sound_memory: [0xAAu8; 16],
             dt: Timer::new(),
             st: Timer::new(),
             memory: [0u8; MEMSIZE],
@@ -697,7 +694,9 @@ impl Cpu {
             }
             (0xF, 0x0, 0x0, 0x2) => {
                 // 0xF002 - Store 16 bytes starting at i in the audio pattern buffer.
-                // NOT YET IMPLEMENTED
+                let i = self.i as usize;
+                let samples = &self.memory[i..i+16];
+                self.sound_memory.copy_from_slice(samples);
             }
             (0xF, _, 0x0, 0x7) => {
                 // Fx07 - LD Vx, DT
@@ -726,7 +725,7 @@ impl Cpu {
                 // Fx18 - LD ST, Vx
                 self.st.set_reg(self.v[x]);
                 if let Some(duration) = self.st.time_left() {
-                    self.sound.play_samples(&self.sound_memory[..], duration);
+                    self.sound.play_samples_1bit(&self.sound_memory[..], duration);
                 }
             }
             (0xF, _, 0x1, 0xE) => {

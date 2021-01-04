@@ -19,7 +19,7 @@ impl Sound {
             .default_output_device()
             .expect("failed to find a default output device");
         let config = device.default_output_config().unwrap();
-        println!("{:?}", config.sample_rate());
+        //println!("{:?}", config.sample_rate());
 
         let mut blip = BlipBuf::new(config.sample_rate().0);
         blip.set_rates(fs_input, config.sample_rate().0 as f64);
@@ -45,6 +45,16 @@ impl Sound {
 
     pub fn stop(&mut self) {
         self.stream = None;
+    }
+
+    pub fn play_samples_1bit(&mut self, samples: &[u8], duration: Duration) {
+        let mut samples_conv = [0i16;16*8];
+        for (batch, inp) in samples_conv.chunks_mut(8).zip(samples.iter()) {
+            for (i,outp ) in batch.iter_mut().enumerate() {
+                *outp = (((*inp >> (7 - i)) & 0x1) as i16 * 2 - 1) * 10000;
+            }
+        }
+        self.play_samples(&samples_conv[..], duration);
     }
 
     pub fn play_samples(&mut self, samples: &[i16], duration: Duration) {
@@ -109,12 +119,6 @@ where
     while blip.samples_avail() > 0 && buf[read..].len() > 0 {
         read += blip.read_samples(&mut buf[read..], false);
     }
-
-    println!(
-        "samples_avail: {}; buf[read..].len(): {}",
-        blip.samples_avail(),
-        buf[read..].len()
-    );
 
     output
         .chunks_mut(channels)
