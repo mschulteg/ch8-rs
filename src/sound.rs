@@ -21,7 +21,8 @@ impl Sound {
         let config = device.default_output_config().unwrap();
         //println!("{:?}", config.sample_rate());
 
-        let mut blip = BlipBuf::new(config.sample_rate().0);
+        // setup blip with enough sample space for the maximum tone duration of 255/60 seconds.
+        let mut blip = BlipBuf::new(config.sample_rate().0 * 256 / 60);
         blip.set_rates(fs_input, config.sample_rate().0 as f64);
         let blip = Arc::new(Mutex::new(blip));
 
