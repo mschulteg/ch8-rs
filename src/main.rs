@@ -9,6 +9,7 @@ use std::io::BufReader;
 use std::io::Read;
 use std::u32;
 
+use anyhow::Context;
 use clap::{App, Arg};
 
 fn parse_colors(input: &str) -> [u32; 4] {
@@ -19,7 +20,7 @@ fn parse_colors(input: &str) -> [u32; 4] {
     colors
 }
 
-fn main() {
+fn main() -> Result<(), anyhow::Error> {
     let matches = App::new("Chip8Emu")
         .version("1.0")
         .author("Moritz Schulte")
@@ -87,7 +88,7 @@ fn main() {
         )
         .get_matches();
 
-    let path = matches.value_of("rom_path").expect("No file given");
+    let path = matches.value_of("rom_path").unwrap();
     let debug = matches.occurrences_of("debug");
     let fps_limit = matches
         .value_of("fps-limit")
@@ -110,12 +111,12 @@ fn main() {
         .value_of("colors")
         .and_then(|colors| Some(parse_colors(colors)));
 
-    let f = File::open(path).unwrap();
+    let f = File::open(path).with_context(|| format!("Rom file {} is cannot be opened", path))?;
     let mut buf_reader = BufReader::new(f);
     let mut code = Vec::<u8>::new();
     buf_reader
         .read_to_end(&mut code)
-        .expect("Could not read file to end");
+        .context("Could not read rom file to end")?;
 
     let emulator = Emulator::new()
         .with_skip_frames(skip_frames)
@@ -124,5 +125,6 @@ fn main() {
         .with_colors(colors)
         .with_debug(debug);
 
-    emulator.run(code);
+    emulator.run(code)?;
+    Ok(())
 }

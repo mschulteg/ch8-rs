@@ -80,6 +80,8 @@ impl Default for Keyboard {
 }
 
 pub struct Plane {
+    // x: 0 - 63 (or 127) pixels are stored in 0-7 (or 15) bytes
+    // y: 0 - 31 (or 63) bytes
     cells: Vec<u8>,
     pub width: usize,
     pub height: usize,
@@ -192,9 +194,6 @@ impl Plane {
 }
 
 pub struct Display {
-    // x: 0 - 63 pixels or 0-7 bytes
-    // y: 0 - 31 bytes
-    //pub cells: Vec<u8>,
     pub planes: Vec<Plane>,
     pub width: usize,
     pub height: usize,
@@ -217,10 +216,6 @@ impl Display {
             colors: [0x00AA4400, 0x00FFAA00, 0x00AAAAAA, 0x00000000],
             active_planes: 0x1,
         }
-    }
-
-    fn plane_is_active(&self, index: u8) -> bool {
-        (self.active_planes >> index) & 0x1 == 1
     }
 
     fn set_extended(&mut self, ext: bool) {

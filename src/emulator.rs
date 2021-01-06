@@ -4,6 +4,7 @@ use std::thread;
 use super::cpu::{Cpu, VKey, HEIGHT, WIDTH};
 use super::perf::PerfLimiter;
 
+use anyhow::Context;
 use minifb::{Key, Scale, Window, WindowOptions};
 
 #[derive(Copy, Clone)]
@@ -51,15 +52,13 @@ impl Emulator {
         self
     }
 
-    pub fn run(&self, code: Vec<u8>) {
+    pub fn run(&self, code: Vec<u8>) -> Result<(), anyhow::Error> {
         let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT * 4];
         let mut window_options = WindowOptions::default();
         window_options.scale = Scale::X16;
         window_options.resize = true;
-        let mut window = Window::new("Test - ESC to exit", WIDTH, HEIGHT, window_options)
-            .unwrap_or_else(|e| {
-                panic!("{}", e);
-            });
+        let mut window = Window::new("CHIP8 - ESC to exit", WIDTH, HEIGHT, window_options)
+            .context("Could not create minifb window")?;
 
         window.limit_update_rate(None);
 
@@ -75,6 +74,7 @@ impl Emulator {
         let skip_frames = self.skip_frames;
         let colors = self.colors.clone();
         let cpu_thread = thread::spawn(move || {
+            // cpu cannot be moved into this thread since it is !Send because of CPAL stream
             let mut cpu = Cpu::new(&code[..], 1.0);
             if let Some(colors) = colors {
                 cpu.display.colors = colors;
@@ -85,14 +85,15 @@ impl Emulator {
                     println!("{:?}", cpu);
                     println!("Instruction: {:#X}", cpu.next_instruction());
                 }
-
+                
+                // Calculate next instruction
                 cpu.tick();
 
                 //this variant skips frames
                 if skip_frames {
                     // && cpu.display.updated{
                     // The cpu.display.updated check can be added to increase IPS.
-                    // but it increases flickering due to short inbetween states
+                    // But it increases flickering due to short inbetween states
                     // not being skipped.
                     match tx_disp_notify.try_send(()) {
                         Ok(..) => {
@@ -151,7 +152,9 @@ impl Emulator {
                 Ok(..) => match rx_disp.recv() {
                     Ok((display_buf, height, width)) => {
                         buffer[..height * width].copy_from_slice(&display_buf[..]);
-                        window.update_with_buffer(&buffer, width, height).unwrap();
+                        window
+                            .update_with_buffer(&buffer, width, height)
+                            .context("Updating minifb display buffer failed")?;
                     }
                     Err(RecvError) => break,
                 },
@@ -165,10 +168,11 @@ impl Emulator {
                 println!("fps: {}", perf_io.get_fps());
             }
         }
-        println!("exiting");
+        println!("Exiting");
         drop(rx_disp);
         drop(tx_keys);
-        cpu_thread.join().unwrap();
+        cpu_thread.join().expect("Failed joining cpu thread");
+        Ok(())
     }
 }
 
