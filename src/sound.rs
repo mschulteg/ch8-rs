@@ -1,56 +1,84 @@
+use anyhow::Context;
 use blip_buf::BlipBuf;
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::sync::mpsc::{self, Receiver, SendError, SyncSender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 pub struct Sound {
-    device: cpal::Device,
-    config: cpal::SupportedStreamConfig,
-    blip: Arc<Mutex<BlipBuf>>,
-    stream: Option<cpal::Stream>,
     fs_input: f64,
+    audio_stream: Option<AudioStream>,
+}
+
+pub struct AudioStream {
+    blip: Arc<Mutex<BlipBuf>>,
+    stop_channel: SyncSender<()>,
+    thread: thread::JoinHandle<Result<(), anyhow::Error>>,
 }
 
 impl Sound {
     pub fn new(fs_input: f64) -> Self {
-        let host = cpal::default_host();
-
-        let device = host
-            .default_output_device()
-            .expect("failed to find a default output device");
-        let config = device.default_output_config().unwrap();
-
-        // setup blip with enough sample space for the maximum tone duration of 255/60 seconds.
-        let mut blip = BlipBuf::new(config.sample_rate().0 * 256 / 60);
-        blip.set_rates(fs_input, config.sample_rate().0 as f64);
-        let blip = Arc::new(Mutex::new(blip));
-
         Self {
-            device,
-            config,
-            blip,
-            stream: None,
             fs_input,
+            audio_stream: None,
         }
     }
 
-    pub fn start(&mut self) {
-        let result = match self.config.sample_format() {
-            cpal::SampleFormat::F32 => self._run::<f32>().unwrap(),
-            cpal::SampleFormat::I16 => self._run::<i16>().unwrap(),
-            cpal::SampleFormat::U16 => self._run::<u16>().unwrap(),
-        };
-        self.stream = Some(result);
+    pub fn start(&mut self) -> Result<(), anyhow::Error> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .expect("failed to find a default output device");
+        let config = device
+            .default_output_config()
+            .context("Could not find default output config")?;
+
+        // setup blip with enough sample space for the maximum tone duration of 255/60 seconds.
+        let mut blip = BlipBuf::new(config.sample_rate().0 * 256 / 60);
+        blip.set_rates(self.fs_input, config.sample_rate().0 as f64);
+        let blip = Arc::new(Mutex::new(blip));
+
+        let (tx_stop, rx_stop) = mpsc::sync_channel::<()>(1);
+        // Create second sender to stop stream thread from cpal error callback function
+        let tx_stop2 = tx_stop.clone();
+
+        let thread = match config.sample_format() {
+            cpal::SampleFormat::F32 => {
+                self._run::<f32>(device, config.into(), rx_stop, tx_stop2, blip.clone())
+            }
+            cpal::SampleFormat::I16 => {
+                self._run::<i16>(device, config.into(), rx_stop, tx_stop2, blip.clone())
+            }
+            cpal::SampleFormat::U16 => {
+                self._run::<u16>(device, config.into(), rx_stop, tx_stop2, blip.clone())
+            }
+        }?;
+        self.audio_stream = Some(AudioStream {
+            blip,
+            stop_channel: tx_stop,
+            thread,
+        });
+        Ok(())
     }
 
-    pub fn stop(&mut self) {
-        self.stream = None;
+    #[allow(dead_code)]
+    pub fn stop(&mut self) -> Result<(), anyhow::Error> {
+        let audio_stream = std::mem::replace(&mut self.audio_stream, None);
+        if let Some(audio_stream) = audio_stream {
+            match audio_stream.stop_channel.send(()) {
+                Ok(..) => {}
+                Err(SendError(..)) => {}
+            };
+            audio_stream.thread.join().unwrap()?;
+        }
+        Ok(())
     }
 
     pub fn play_samples_1bit(&mut self, samples: &[u8], duration: Duration) {
-        let mut samples_conv = [0i16;16*8];
+        let mut samples_conv = [0i16; 16 * 8];
         for (batch, inp) in samples_conv.chunks_mut(8).zip(samples.iter()) {
-            for (i,outp ) in batch.iter_mut().enumerate() {
+            for (i, outp) in batch.iter_mut().enumerate() {
                 *outp = (((*inp >> (7 - i)) & 0x1) as i16 * 2 - 1) * 10000;
             }
         }
@@ -58,7 +86,8 @@ impl Sound {
     }
 
     pub fn play_samples(&mut self, samples: &[i16], duration: Duration) {
-        let mut blip = self.blip.lock().unwrap();
+        let audio_stream = self.audio_stream.as_ref().unwrap();
+        let mut blip = audio_stream.blip.lock().unwrap();
 
         blip.clear();
         let mut time = 0usize; // takes count of how many samples were written in the current frame
@@ -77,34 +106,42 @@ impl Sound {
         }
     }
 
-    fn _run<T>(&mut self) -> Result<cpal::Stream, anyhow::Error>
+    fn _run<T>(
+        &mut self,
+        device: cpal::Device,
+        config: cpal::StreamConfig,
+        rx_stop: Receiver<()>,
+        tx_stop: SyncSender<()>,
+        blip: Arc<Mutex<BlipBuf>>,
+    ) -> Result<thread::JoinHandle<Result<(), anyhow::Error>>, anyhow::Error>
     where
         T: cpal::Sample,
     {
-        let config: &cpal::StreamConfig = &self.config.clone().into();
+        let err_fn = move |err| {
+            match tx_stop.send(()) {
+                Ok(..) => {}
+                Err(SendError(..)) => {}
+            };
+            eprintln!("an error occurred on stream: {}", err)
+        };
+
         let channels = config.channels as usize;
 
-        let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-
-        let blip = self.blip.clone();
-        let stream = self.device.build_output_stream(
-            config,
-            move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                write_data(data, channels, blip.clone())
-            },
-            err_fn,
-        )?;
-        Ok(stream)
-    }
-}
-
-fn main() {
-    let mut sound = Sound::new(4000.0);
-    sound.start();
-    loop {
-        let samples: [i16; 4] = [-10000, -10000, 10000, 10000];
-        sound.play_samples(&samples[..], Duration::from_millis(500));
-        std::thread::sleep(Duration::from_millis(1000));
+        let thread = thread::spawn(move || -> Result<(), anyhow::Error> {
+            // Create stream in its own thread so that we can safe it in scope and do not
+            // need to save it in Sound, which would make both Sound and CPU !Send
+            let stream = device.build_output_stream(
+                &config,
+                move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                    write_data(data, channels as usize, blip.clone())
+                },
+                err_fn,
+            )?;
+            stream.play()?;
+            rx_stop.recv()?;
+            Ok(())
+        });
+        Ok(thread)
     }
 }
 

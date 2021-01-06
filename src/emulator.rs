@@ -79,6 +79,7 @@ impl Emulator {
             if let Some(colors) = colors {
                 cpu.display.colors = colors;
             }
+            cpu.start_audio()?;
             loop {
                 if debug >= 2 {
                     println!("{:?}", cpu.keyboard.keys);

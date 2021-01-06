@@ -424,7 +424,6 @@ impl fmt::Debug for Cpu {
 impl Cpu {
     pub fn new(code: &[u8], multi: f64) -> Self {
         let mut cpu = Self::default();
-        cpu.sound.start();
         cpu.dt.multi = multi;
         cpu.st.multi = multi;
         cpu.memory[0..80].copy_from_slice(&cpu.display.std_sprites());
@@ -432,6 +431,11 @@ impl Cpu {
         cpu.memory[0x200..0x200 + code.len()].copy_from_slice(code);
         cpu.pc = 0x200;
         cpu
+    }
+
+    pub fn start_audio(&mut self) -> Result<(), anyhow::Error> {
+        self.sound.start()?;
+        Ok(())
     }
 
     pub fn next_instruction(&self) -> u16 {
