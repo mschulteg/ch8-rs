@@ -2,8 +2,6 @@ use std::convert::TryInto;
 use std::fmt;
 use std::time::{Instant, Duration};
 
-use anyhow::Context;
-
 use super::sound::Sound;
 
 pub const WIDTH: usize = 64;

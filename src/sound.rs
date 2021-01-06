@@ -13,7 +13,7 @@ pub struct Sound {
 
 pub struct AudioStream {
     blip: Arc<Mutex<BlipBuf>>,
-    stop_channel: SyncSender<()>,
+    tx_stop: SyncSender<()>,
     thread: thread::JoinHandle<Result<(), anyhow::Error>>,
 }
 
@@ -56,7 +56,7 @@ impl Sound {
         }?;
         self.audio_stream = Some(AudioStream {
             blip,
-            stop_channel: tx_stop,
+            tx_stop,
             thread,
         });
         Ok(())
@@ -66,7 +66,7 @@ impl Sound {
     pub fn stop(&mut self) -> Result<(), anyhow::Error> {
         let audio_stream = std::mem::replace(&mut self.audio_stream, None);
         if let Some(audio_stream) = audio_stream {
-            match audio_stream.stop_channel.send(()) {
+            match audio_stream.tx_stop.send(()) {
                 Ok(..) => {}
                 Err(SendError(..)) => {}
             };
