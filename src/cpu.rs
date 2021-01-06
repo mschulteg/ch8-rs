@@ -43,11 +43,11 @@ impl Timer {
         let steps_last_update = until_last_update.as_secs_f64() * self.freq_hz * self.multi;
         // cast to int to make the divisions above integer divisions
         let diff = steps_now as u64 - steps_last_update as u64;
-        return if (self._reg_value as u64) < diff {
+        if (self._reg_value as u64) < diff {
             0
         } else {
             self._reg_value - diff as u8
-        };
+        }
     }
 
     fn time_left(&self) -> Option<Duration> {
@@ -140,7 +140,7 @@ impl Plane {
         let mut collision = false;
         let x = x % self.width as u8;
         let y = y % self.height as u8;
-        for i in 0..sprite.len() {
+        for (i, _) in sprite.iter().enumerate() {
             let y_roll = ((y as usize + i) % self.height) as u8;
             let cur_val = self.get_byte(x, y_roll);
             let new_val = cur_val ^ sprite[i];
@@ -175,8 +175,7 @@ impl Plane {
 
         let word = (self.cells[line_offs + offs_bytes] as u16) << 8
             | self.cells[line_offs + (offs_bytes + 1) % (self.width / 8)] as u16;
-        let res = ((word >> (8 - offs_bits)) & 0xFF) as u8;
-        res
+        ((word >> (8 - offs_bits)) & 0xFF) as u8
     }
 
     fn set_byte(&mut self, x: u8, y: u8, val: u8) {
@@ -208,8 +207,8 @@ impl Display {
     fn new(height: usize, width: usize) -> Self {
         Self {
             planes: vec![Plane::new(height, width), Plane::new(height, width)],
-            width: width,
-            height: height,
+            width,
+            height,
             updates: 0,
             updated: true,
             extended: false,
@@ -246,7 +245,7 @@ impl Display {
             for x in 0..self.width / 8 {
                 for bit in 0..8 {
                     let mut bitplane = 0;
-                    bitplane |= ((cells1[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) << 0;
+                    bitplane |= (cells1[y * (self.width / 8) + x] >> (7 - bit)) & 0x1;
                     bitplane |= ((cells2[y * (self.width / 8) + x] >> (7 - bit)) & 0x1) << 1;
                     buf.push(self.colors[bitplane as usize]);
                 }
@@ -461,7 +460,7 @@ impl Cpu {
         nibbles[0] = ((instr >> 12) & 0xF) as u8;
         nibbles[1] = ((instr >> 8) & 0xF) as u8;
         nibbles[2] = ((instr >> 4) & 0xF) as u8;
-        nibbles[3] = ((instr >> 0) & 0xF) as u8;
+        nibbles[3] = (instr & 0xF) as u8;
         let x = nibbles[1] as usize;
         let y = nibbles[2] as usize;
         let nnn = instr & 0xFFF;
@@ -481,7 +480,7 @@ impl Cpu {
             }
             (0x0, _, 0xE, 0xE) => {
                 self.pc = self.stack[self.sp as usize];
-                self.sp = self.sp - 1;
+                self.sp -= 1;
             }
             (0x0, 0x0, 0xF, 0xB) => {
                 // Scroll display 4 pixels right
@@ -510,7 +509,7 @@ impl Cpu {
             }
             (0x2, ..) => {
                 // CALL addr
-                self.sp = self.sp + 1;
+                self.sp += 1;
                 self.stack[self.sp as usize] = self.pc;
                 self.pc = nnn;
                 return Ok(());
@@ -564,15 +563,15 @@ impl Cpu {
             }
             (0x8, _, _, 0x1) => {
                 // 8xy1 - OR Vx, Vy
-                self.v[x] = self.v[x] | self.v[y];
+                self.v[x] |= self.v[y];
             }
             (0x8, _, _, 0x2) => {
                 // 8xy2 - AND Vx, Vy
-                self.v[x] = self.v[x] & self.v[y];
+                self.v[x] &= self.v[y];
             }
             (0x8, _, _, 0x3) => {
                 // 8xy3 - XOR Vx, Vy
-                self.v[x] = self.v[x] ^ self.v[y];
+                self.v[x] ^= self.v[y];
             }
             (0x8, _, _, 0x4) => {
                 // 8xy4 - ADD Vx, Vy
@@ -590,7 +589,7 @@ impl Cpu {
                 let mut res = x_val - y_val;
                 let vf = if res < 0 { 0 } else { 1 };
                 if res < 0 {
-                    res = 256 + res;
+                    res += 256;
                 }
                 self.v[x] = (res & 0xFF) as u8;
                 self.v[0xF] = vf;
@@ -611,7 +610,7 @@ impl Cpu {
                 let mut res = y_val - x_val;
                 let vf = if res < 0 { 0 } else { 1 };
                 if res < 0 {
-                    res = 256 + res;
+                    res += 256;
                 }
                 self.v[x] = (res & 0xFF) as u8;
                 self.v[0xF] = vf;

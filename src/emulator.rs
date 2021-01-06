@@ -72,7 +72,7 @@ impl Emulator {
         let mut ticker_fps = PerfLimiter::new(Some(1.0));
         let debug = self.debug;
         let skip_frames = self.skip_frames;
-        let colors = self.colors.clone();
+        let colors = self.colors;
         let cpu_thread = thread::spawn(move || -> Result<(), anyhow::Error> {
             // cpu cannot be moved into this thread since it is !Send because of CPAL stream
             let mut cpu = Cpu::new(&code[..], 1.0);
@@ -113,17 +113,15 @@ impl Emulator {
                         Err(TrySendError::Full(..)) => {} //skipped frame
                         Err(TrySendError::Disconnected(..)) => break,
                     }
-                } else {
-                    if cpu.display.updated {
-                        cpu.display.updated = false;
-                        match tx_disp.send((
-                            cpu.display.to_buf(),
-                            cpu.display.height,
-                            cpu.display.width,
-                        )) {
-                            Ok(..) => {}
-                            Err(SendError(..)) => break,
-                        }
+                } else if cpu.display.updated {
+                    cpu.display.updated = false;
+                    match tx_disp.send((
+                        cpu.display.to_buf(),
+                        cpu.display.height,
+                        cpu.display.width,
+                    )) {
+                        Ok(..) => {}
+                        Err(SendError(..)) => break,
                     }
                 }
 

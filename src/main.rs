@@ -14,7 +14,7 @@ use clap::{App, Arg};
 
 fn parse_colors(input: &str) -> [u32; 4] {
     let mut colors = [0u32; 4];
-    for (i, ccode) in input.split(",").take(4).enumerate() {
+    for (i, ccode) in input.split(',').take(4).enumerate() {
         colors[i] = u32::from_str_radix(ccode, 16).unwrap()
     }
     colors
@@ -109,7 +109,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let colors = matches
         .value_of("colors")
-        .and_then(|colors| Some(parse_colors(colors)));
+        .map(|colors| parse_colors(colors));
 
     let f = File::open(path).with_context(|| format!("Rom file {} is cannot be opened", path))?;
     let mut buf_reader = BufReader::new(f);

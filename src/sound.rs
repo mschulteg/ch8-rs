@@ -153,7 +153,7 @@ where
 
     let mut buf = vec![0i16; output.len() / 2];
     let mut read = 0usize;
-    while blip.samples_avail() > 0 && buf[read..].len() > 0 {
+    while blip.samples_avail() > 0 && !buf[read..].is_empty() {
         read += blip.read_samples(&mut buf[read..], false);
     }
 
