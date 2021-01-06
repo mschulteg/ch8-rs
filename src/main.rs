@@ -10,7 +10,7 @@ use std::io::Read;
 use std::u32;
 
 use anyhow::Context;
-use clap::{App, Arg};
+use clap::{crate_version, crate_authors, crate_name, App, Arg};
 
 fn parse_colors(input: &str) -> [u32; 4] {
     let mut colors = [0u32; 4];
@@ -21,9 +21,9 @@ fn parse_colors(input: &str) -> [u32; 4] {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    let matches = App::new("Chip8Emu")
-        .version("1.0")
-        .author("Moritz Schulte")
+    let matches = App::new(crate_name!())
+        .version(crate_version!())
+        .author(crate_authors!())
         .about("Chip 8 emulator")
         .arg(
             Arg::with_name("rom_path")
@@ -65,12 +65,14 @@ fn main() -> Result<(), anyhow::Error> {
                 .long("colors")
                 .value_name("COLORS")
                 .help(
-                    "Four or two colors provided as four or two 6 digit hex numbers separated with a comma.
-                     For chip8 and super-chip8 programs, two colors can be specified, the first one for
-                     a pixel with value 0 and the second one for a pixel with the value 1.
-                     For xo-chip programs, four colors can be provided for the four possible combinations
-                     of values in the two drawing planes: no plane, plane 1, plane 2, plane 1 and 2
-                     Example 1: 000000,FF0000,00FF00,0000FF",
+                    "Four or two colors provided as four or two 6 digit hex numbers separated with a comma. \
+                     For chip8 and super-chip8 programs, two colors can be specified, representing the background \
+                     and foreground colors.\n\
+                     Example: 000000,FFFFFF sets the background color to black and the foreground color to white.\n\
+                     For xo-chip programs, four colors can be provided for the four possible combinations \
+                     of values in the two drawing planes.\n\
+                     Example: 000000,FF0000,00FF00,0000FF sets the colors for \"background, plane1, plane2, both planes blended\" or \
+                     in other words: it sets the \"background, fill1, fill2, blend\" colors\n",
                 )
                 .takes_value(true)
                 .default_value("00AA4400,00FFAA00,00AAAAAA,00000000"),
