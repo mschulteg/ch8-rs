@@ -2,6 +2,8 @@ use std::convert::TryInto;
 use std::fmt;
 use std::time::{Instant, Duration};
 
+use anyhow::Context;
+
 use super::sound::Sound;
 
 pub const WIDTH: usize = 64;
@@ -320,15 +322,15 @@ impl Display {
         collision
     }
 
-    fn write_sprite16(&mut self, sprite: &[u8], x: u8, y: u8) -> bool {
+    fn write_sprite16(&mut self, sprite: &[u8], x: u8, y: u8) -> Result<bool, anyhow::Error> {
         let mut collision = false;
         match self.active_planes {
             0x3 => {
                 let length = sprite.len();
                 collision |=
-                    self.planes[0].write_sprite16(&sprite[..length / 2].try_into().unwrap(), x, y);
+                    self.planes[0].write_sprite16(&sprite[..length / 2].try_into()?, x, y);
                 collision |=
-                    self.planes[1].write_sprite16(&sprite[length / 2..].try_into().unwrap(), x, y);
+                    self.planes[1].write_sprite16(&sprite[length / 2..].try_into()?, x, y);
             }
             _ => {
                 for (i, plane) in self.planes.iter_mut().enumerate() {
@@ -339,7 +341,7 @@ impl Display {
             }
         }
         self.flag_updated();
-        collision
+        Ok(collision)
     }
 
     fn std_sprites(&self) -> [u8; 80] {
@@ -443,16 +445,16 @@ impl Cpu {
         }
     }
 
-    pub fn tick(&mut self) -> u16 {
+    pub fn tick(&mut self) -> Result<u16, anyhow::Error> {
         let instr = self.next_instruction();
-        self.process_instruction(instr);
+        self.process_instruction(instr)?;
         self.clock_steps += 1;
         //assert!((self.pc % 2) == 0, "program counter is not even");
         // slipperyslope jumps to uneven instruction (level-unpack at 0x265 (0x65 in file))
-        instr
+        Ok(instr)
     }
 
-    fn process_instruction(&mut self, instr: u16) {
+    fn process_instruction(&mut self, instr: u16) -> Result<(), anyhow::Error>{
         let mut nibbles = [0u8; 4];
         nibbles[0] = ((instr >> 12) & 0xF) as u8;
         nibbles[1] = ((instr >> 8) & 0xF) as u8;
@@ -502,14 +504,14 @@ impl Cpu {
             (0x1, ..) => {
                 // JP addr
                 self.pc = nnn;
-                return;
+                return Ok(());
             }
             (0x2, ..) => {
                 // CALL addr
                 self.sp = self.sp + 1;
                 self.stack[self.sp as usize] = self.pc;
                 self.pc = nnn;
-                return;
+                return Ok(());
             }
             (0x3, ..) => {
                 // SE Vx, byte
@@ -635,7 +637,7 @@ impl Cpu {
                 // Bnnn - JP V0, addr
                 //self.pc = nnn + self.v[x] as u16;
                 self.pc = nnn + self.v[0] as u16;
-                return;
+                return Ok(());
             }
             (0xC, ..) => {
                 // Cxkk - RND Vx, byte
@@ -652,7 +654,7 @@ impl Cpu {
                         start + 32 as usize
                     };
                     let sprites = &self.memory[start..end];
-                    let collision = self.display.write_sprite16(sprites, self.v[x], self.v[y]);
+                    let collision = self.display.write_sprite16(sprites, self.v[x], self.v[y])?;
                     self.v[0xF] = if collision { 1 } else { 0 };
                 } else {
                     let end = if self.display.active_planes == 0x3 {
@@ -709,7 +711,7 @@ impl Cpu {
                 }
                 self.keyboard.prev_keys = self.keyboard.keys;
                 if !key_change {
-                    return;
+                    return Ok(());
                 }
             }
             (0xF, _, 0x1, 0x5) => {
@@ -772,6 +774,7 @@ impl Cpu {
             _ => panic!("unknown opcode: {}", instr),
         }
         self.pc += 2;
+        Ok(())
     }
 }
 

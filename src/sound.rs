@@ -19,7 +19,6 @@ impl Sound {
             .default_output_device()
             .expect("failed to find a default output device");
         let config = device.default_output_config().unwrap();
-        //println!("{:?}", config.sample_rate());
 
         // setup blip with enough sample space for the maximum tone duration of 255/60 seconds.
         let mut blip = BlipBuf::new(config.sample_rate().0 * 256 / 60);

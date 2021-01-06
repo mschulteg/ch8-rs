@@ -73,7 +73,7 @@ impl Emulator {
         let debug = self.debug;
         let skip_frames = self.skip_frames;
         let colors = self.colors.clone();
-        let cpu_thread = thread::spawn(move || {
+        let cpu_thread = thread::spawn(move || -> Result<(), anyhow::Error> {
             // cpu cannot be moved into this thread since it is !Send because of CPAL stream
             let mut cpu = Cpu::new(&code[..], 1.0);
             if let Some(colors) = colors {
@@ -87,7 +87,7 @@ impl Emulator {
                 }
                 
                 // Calculate next instruction
-                cpu.tick();
+                cpu.tick()?;
 
                 //this variant skips frames
                 if skip_frames {
@@ -138,6 +138,7 @@ impl Emulator {
                     println!("tps: {}", perf_cpu.get_fps());
                 }
             }
+            Ok(())
         });
 
         while window.is_open() && !window.is_key_down(Key::Escape) {
@@ -171,9 +172,10 @@ impl Emulator {
         println!("Exiting");
         drop(rx_disp);
         drop(tx_keys);
-        cpu_thread.join().expect("Failed joining cpu thread");
+        cpu_thread.join().unwrap().context("Failed in CPU thread")?;
         Ok(())
     }
+
 }
 
 fn convert_keys(window: &Window) -> [VKey; 16] {
