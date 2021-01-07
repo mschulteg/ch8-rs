@@ -88,7 +88,7 @@ impl Emulator {
                 }
                 
                 // Calculate next instruction
-                cpu.tick()?;
+                let instructions_done = cpu.tick()?;
 
                 //this variant skips frames
                 if skip_frames {
@@ -132,7 +132,13 @@ impl Emulator {
                     Err(TryRecvError::Empty) => {}
                     Err(TryRecvError::Disconnected) => break,
                 }
-                perf_cpu.wait();
+                if instructions_done > 0 {
+                    perf_cpu.wait();
+                } else {
+                    // No instruction was executed, cpu is stuck waiting for key input
+                    // Use hard coded delay instead of counting cpu ticks
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
                 if !ticker_tps.wait_nonblocking() && debug >= 1 {
                     println!("tps: {}", perf_cpu.get_fps());
                 }

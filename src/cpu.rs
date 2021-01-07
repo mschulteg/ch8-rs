@@ -455,7 +455,7 @@ impl Cpu {
         Ok(instr)
     }
 
-    fn process_instruction(&mut self, instr: u16) -> Result<(), anyhow::Error>{
+    fn process_instruction(&mut self, instr: u16) -> Result<usize, anyhow::Error>{
         let mut nibbles = [0u8; 4];
         nibbles[0] = ((instr >> 12) & 0xF) as u8;
         nibbles[1] = ((instr >> 8) & 0xF) as u8;
@@ -505,14 +505,14 @@ impl Cpu {
             (0x1, ..) => {
                 // JP addr
                 self.pc = nnn;
-                return Ok(());
+                return Ok(1);
             }
             (0x2, ..) => {
                 // CALL addr
                 self.sp += 1;
                 self.stack[self.sp as usize] = self.pc;
                 self.pc = nnn;
-                return Ok(());
+                return Ok(1);
             }
             (0x3, ..) => {
                 // SE Vx, byte
@@ -638,7 +638,7 @@ impl Cpu {
                 // Bnnn - JP V0, addr
                 //self.pc = nnn + self.v[x] as u16;
                 self.pc = nnn + self.v[0] as u16;
-                return Ok(());
+                return Ok(1);
             }
             (0xC, ..) => {
                 // Cxkk - RND Vx, byte
@@ -712,7 +712,7 @@ impl Cpu {
                 }
                 self.keyboard.prev_keys = self.keyboard.keys;
                 if !key_change {
-                    return Ok(());
+                    return Ok(0);
                 }
             }
             (0xF, _, 0x1, 0x5) => {
@@ -775,7 +775,7 @@ impl Cpu {
             _ => panic!("unknown opcode: {}", instr),
         }
         self.pc += 2;
-        Ok(())
+        Ok(1)
     }
 }
 
