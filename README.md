@@ -2,7 +2,8 @@ ch8-rs
 ======
 
 CHIP-8 emulator that also supports Super-CHIP8 and XO-CHIP (with audio).
-Different quirks are not yet implemented and only a bunch of roms were tested.
+The main purpose of this project is for me to learn a bit about Rust.
+Different quirks are not yet implemented and only a bunch of roms are tested.
 
 ## Usage
 
