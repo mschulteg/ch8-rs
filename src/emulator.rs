@@ -140,7 +140,7 @@ impl Emulator {
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
                 if !ticker_tps.wait_nonblocking() && debug >= 1 {
-                    println!("tps: {}", perf_cpu.get_fps());
+                    println!("instructions per second (ips): {}", perf_cpu.get_fps());
                 }
             }
             Ok(())
@@ -171,7 +171,7 @@ impl Emulator {
             }
             perf_io.wait();
             if !ticker_fps.wait_nonblocking() && debug >= 1 {
-                println!("fps: {}", perf_io.get_fps());
+                println!("frames per second       (fps): {}", perf_io.get_fps());
             }
         }
         println!("Exiting");
