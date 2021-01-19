@@ -72,13 +72,13 @@ impl Emulator {
         let mut ticker_fps = PerfLimiter::new(Some(1.0));
         let debug = self.debug;
         let skip_frames = self.skip_frames;
-        let colors = self.colors;
+
+        let mut cpu = Cpu::new(&code[..], 1.0);
+        if let Some(colors) = self.colors {
+            cpu.display.colors = colors;
+        }
+
         let cpu_thread = thread::spawn(move || -> Result<(), anyhow::Error> {
-            // cpu cannot be moved into this thread since it is !Send because of CPAL stream
-            let mut cpu = Cpu::new(&code[..], 1.0);
-            if let Some(colors) = colors {
-                cpu.display.colors = colors;
-            }
             cpu.start_audio()?;
             loop {
                 if debug >= 2 {
@@ -86,7 +86,7 @@ impl Emulator {
                     println!("{:?}", cpu);
                     println!("Instruction: {:#X}", cpu.next_instruction());
                 }
-                
+
                 // Calculate next instruction
                 let instructions_done = cpu.tick()?;
 
@@ -180,7 +180,6 @@ impl Emulator {
         cpu_thread.join().unwrap().context("Failed in CPU thread")?;
         Ok(())
     }
-
 }
 
 fn convert_keys(window: &Window) -> [VKey; 16] {
