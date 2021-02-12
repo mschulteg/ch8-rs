@@ -64,7 +64,7 @@ impl Sound {
 
     #[allow(dead_code)]
     pub fn stop(&mut self) -> Result<(), anyhow::Error> {
-        let audio_stream = std::mem::replace(&mut self.audio_stream, None);
+        let audio_stream = self.audio_stream.take();
         if let Some(audio_stream) = audio_stream {
             match audio_stream.tx_stop.send(()) {
                 Ok(..) => {}
