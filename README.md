@@ -5,12 +5,18 @@ CHIP-8 emulator that also supports Super-CHIP8 and XO-CHIP (with audio).
 The main purpose of this project is for me to learn a bit about Rust.
 Different quirks are not yet implemented and only a bunch of roms are tested.
 
+## Example
+
+``` console
+cargo run --release -- "roms/xochip/superneatboy.ch8" -d --colors 100010,E6E6FA,FF1493,FF1493 --fps-limit 60 --ips-limit 100000
+```
+
 ## Usage
 
 ``` console
 $ cargo run --release -- --help
 
-ch8-rs 0.1.0
+ch8-rs 0.1.1
 Moritz Schulte <mschulte.g@gmail.com>
 Chip 8 emulator
 
@@ -42,6 +48,9 @@ OPTIONS:
 ARGS:
     <rom_path>    Path to rom file
 ```
+
+## Issues
+- The fps limiter is unprecise under windows
 
 ## Requirements
 
