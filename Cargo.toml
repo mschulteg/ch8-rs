@@ -7,10 +7,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = "0.7"
+rand = "0.8"
 minifb = {version = "0.20", default-features = false, features = ["x11"]}
-clap = "2.33.3"
-hex = "0.4.2"
-cpal = "0.13.1"
-blip_buf = "0.1.4"
-anyhow = "1.0.37"
+clap = "2.0"
+hex = "0.4"
+cpal = "0.13"
+blip_buf = "0.1"
+anyhow = "1.0"
