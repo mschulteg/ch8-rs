@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 rand = "0.7"
-minifb = "0.19.1"
+minifb = {version = "0.20", default-features = false, features = ["x11"]}
 clap = "2.33.3"
 hex = "0.4.2"
 cpal = "0.13.1"
