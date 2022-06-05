@@ -53,14 +53,6 @@ impl Emulator {
     }
 
     pub fn run(&self, code: Vec<u8>) -> Result<(), anyhow::Error> {
-        let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT * 4];
-        let mut window_options = WindowOptions::default();
-        window_options.scale = Scale::X16;
-        window_options.resize = true;
-        let mut window = Window::new("CHIP8 - ESC to exit", WIDTH, HEIGHT, window_options)
-            .context("Could not create minifb window")?;
-
-        window.limit_update_rate(None);
 
         let (tx_keys, rx_keys) = mpsc::sync_channel::<[VKey; 16]>(1);
         let (tx_disp, rx_disp) = mpsc::sync_channel::<(Vec<u32>, usize, usize)>(1);
@@ -166,37 +158,53 @@ impl Emulator {
             Ok(())
         });
 
-        while window.is_open() && !window.is_key_down(Key::Escape) {
-            let cpu_keys = convert_keys(&window);
-            match tx_keys.try_send(cpu_keys) {
-                Ok(..) => {}
-                Err(TrySendError::Full(..)) => {} //skipped input
-                Err(TrySendError::Disconnected(..)) => break,
-            }
+        // Main loop
+        let upscaling = 4;
+        let conf = miniquad::conf::Conf {
+            window_title: "Miniquad".to_string(),
+            window_width: WIDTH as i32 * 4 * upscaling,
+            window_height: HEIGHT as i32 * 4 * upscaling,
+            fullscreen: false,
+            ..Default::default()
+        };
+        miniquad::start(conf, |mut ctx| {
+            Box::new(Stage::new(&mut ctx,
+                tx_keys,
+                rx_disp,
+                rx_disp_notify,
+            HEIGHT, WIDTH))
+        });
+        // while window.is_open() && !window.is_key_down(Key::Escape) {
+        //     let cpu_keys = convert_keys(&window);
+        //     match tx_keys.try_send(cpu_keys) {
+        //         Ok(..) => {}
+        //         Err(TrySendError::Full(..)) => {} //skipped input
+        //         Err(TrySendError::Disconnected(..)) => break,
+        //     }
 
-            match rx_disp_notify.try_recv() {
-                Ok(..) => match rx_disp.recv() {
-                    Ok((display_buf, height, width)) => {
-                        buffer[..height * width].copy_from_slice(&display_buf[..]);
-                        window
-                            .update_with_buffer(&buffer, width, height)
-                            .context("Updating minifb display buffer failed")?;
-                    }
-                    Err(RecvError) => break,
-                },
-                Err(TryRecvError::Empty) => {
-                    window.update();
-                }
-                Err(TryRecvError::Disconnected) => break,
-            }
-            perf_io.wait();
-            if !ticker_fps.wait_nonblocking() && debug >= 1 {
-                println!("frames per second       (fps): {}", perf_io.get_fps());
-            }
-        }
+        //     match rx_disp_notify.try_recv() {
+        //         Ok(..) => match rx_disp.recv() {
+        //             Ok((display_buf, height, width)) => {
+        //                 buffer[..height * width].copy_from_slice(&display_buf[..]);
+        //                 window
+        //                     .update_with_buffer(&buffer, width, height)
+        //                     .context("Updating minifb display buffer failed")?;
+        //             }
+        //             Err(RecvError) => break,
+        //         },
+        //         Err(TryRecvError::Empty) => {
+        //             window.update();
+        //         }
+        //         Err(TryRecvError::Disconnected) => break,
+        //     }
+        //     perf_io.wait();
+        //     if !ticker_fps.wait_nonblocking() && debug >= 1 {
+        //         println!("frames per second       (fps): {}", perf_io.get_fps());
+        //     }
+        // }
         println!("Exiting");
-        drop(rx_disp);
-        drop(tx_keys);
+        // drop(rx_disp);
+        // drop(tx_keys);
         cpu_thread.join().unwrap().context("Failed in CPU thread")?;
         Ok(())
     }
@@ -233,4 +241,219 @@ fn convert_keys(window: &Window) -> [VKey; 16] {
         .zip(cpu_keys.iter_mut())
         .for_each(|(winkey, cpukey)| *cpukey = winkey);
     cpu_keys
+}
+
+use miniquad::{Buffer, Pipeline, Bindings, BufferType, Texture, FilterMode, Shader, BufferLayout, VertexAttribute, VertexFormat, EventHandler};
+
+#[repr(C)]
+struct Vec2 {
+    x: f32,
+    y: f32,
+}
+#[repr(C)]
+struct Vertex {
+    pos: Vec2,
+    uv: Vec2,
+}
+
+struct Stage {
+    pipeline: Pipeline,
+    bindings: Bindings,
+    tx_keys: mpsc::SyncSender<[VKey; 16]>,
+    rx_disp: mpsc::Receiver<(Vec<u32>, usize, usize)>,
+    rx_disp_notify: mpsc::Receiver<()>,
+    buffer: Vec<u8>,
+    height: usize,
+    width: usize,
+    cpu_keys: [VKey; 16],
+}
+
+impl Stage {
+    pub fn new(ctx: &mut miniquad::Context,
+        tx_keys: mpsc::SyncSender<[VKey; 16]>,
+        rx_disp: mpsc::Receiver<(Vec<u32>, usize, usize)>,
+        rx_disp_notify: mpsc::Receiver<()>,
+        height: usize,
+        width: usize,
+    ) -> Stage {
+        #[rustfmt::skip]
+        let vertices: [Vertex; 4] = [
+            Vertex { pos : Vec2 { x: -1., y: -1. }, uv: Vec2 { x: 0., y: 1. } },
+            Vertex { pos : Vec2 { x:  1., y: -1. }, uv: Vec2 { x: 1., y: 1. } },
+            Vertex { pos : Vec2 { x:  1., y:  1. }, uv: Vec2 { x: 1., y: 0. } },
+            Vertex { pos : Vec2 { x: -1., y:  1. }, uv: Vec2 { x: 0., y: 0. } },
+        ];
+        let vertex_buffer = Buffer::immutable(ctx, BufferType::VertexBuffer, &vertices);
+
+        let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+        let index_buffer = Buffer::immutable(ctx, BufferType::IndexBuffer, &indices);
+
+        let pixels: Vec<u8> = vec![255; height * width * 4];
+        let texture = Texture::from_rgba8(ctx, width as u16,  height as u16, &pixels);
+        texture.set_filter(ctx, FilterMode::Nearest);
+
+        let bindings = Bindings {
+            vertex_buffers: vec![vertex_buffer],
+            index_buffer: index_buffer,
+            images: vec![texture],
+        };
+
+        let shader = Shader::new(ctx, shader::VERTEX, shader::FRAGMENT, shader::meta()).unwrap();
+
+        let pipeline = Pipeline::new(
+            ctx,
+            &[BufferLayout::default()],
+            &[
+                VertexAttribute::new("pos", VertexFormat::Float2),
+                VertexAttribute::new("uv", VertexFormat::Float2),
+            ],
+            shader,
+        );
+
+        Stage { pipeline, bindings, tx_keys, rx_disp, rx_disp_notify, buffer: Vec::new(), cpu_keys: [VKey::Up;16], height, width} 
+    }
+}
+
+impl EventHandler for Stage {
+    fn key_up_event(&mut self, _ctx: &mut miniquad::Context, _keycode: miniquad::KeyCode, _keymods: miniquad::KeyMods) {
+        let idx = match _keycode{
+            miniquad::KeyCode::X => 0,
+            miniquad::KeyCode::Key1 => 1,
+            miniquad::KeyCode::Key2 => 2,
+            miniquad::KeyCode::Key3 => 3,
+            miniquad::KeyCode::Q => 4,
+            miniquad::KeyCode::W => 5,
+            miniquad::KeyCode::E => 6,
+            miniquad::KeyCode::A => 7,
+            miniquad::KeyCode::S => 8,
+            miniquad::KeyCode::D => 9,
+            miniquad::KeyCode::Z => 10,
+            miniquad::KeyCode::C => 11,
+            miniquad::KeyCode::Key4 => 12,
+            miniquad::KeyCode::R => 13,
+            miniquad::KeyCode::F => 14,
+            miniquad::KeyCode::V => 15,
+            _ => 16,
+        };
+        if idx < 16 { self.cpu_keys[idx] = VKey::Up;}
+        if matches!(_keycode, miniquad::KeyCode::Escape) {
+            _ctx.quit();
+        }
+    }
+    fn key_down_event(&mut self, _ctx: &mut miniquad::Context, _keycode: miniquad::KeyCode, _keymods: miniquad::KeyMods, _repeat: bool) {
+        let idx = match _keycode{
+            miniquad::KeyCode::X => 0,
+            miniquad::KeyCode::Key1 => 1,
+            miniquad::KeyCode::Key2 => 2,
+            miniquad::KeyCode::Key3 => 3,
+            miniquad::KeyCode::Q => 4,
+            miniquad::KeyCode::W => 5,
+            miniquad::KeyCode::E => 6,
+            miniquad::KeyCode::A => 7,
+            miniquad::KeyCode::S => 8,
+            miniquad::KeyCode::D => 9,
+            miniquad::KeyCode::Z => 10,
+            miniquad::KeyCode::C => 11,
+            miniquad::KeyCode::Key4 => 12,
+            miniquad::KeyCode::R => 13,
+            miniquad::KeyCode::F => 14,
+            miniquad::KeyCode::V => 15,
+            _ => 16,
+        };
+        if idx < 16 { self.cpu_keys[idx] = VKey::Down;}
+    }
+    fn update(&mut self, _ctx: &mut miniquad::Context) {
+        // let mut cpu_keys = [VKey::Up; 16];
+        match self.tx_keys.try_send(self.cpu_keys) {
+            Ok(..) => {}
+            Err(TrySendError::Full(..)) => {} //skipped input
+            Err(TrySendError::Disconnected(..)) => {_ctx.quit(); return},
+        }
+
+        match self.rx_disp_notify.try_recv() {
+            Ok(..) => match self.rx_disp.recv() {
+                Ok((display_buf, height, width)) => {
+                    self.buffer.clear();
+                    for h in 0..height {
+                        for w in 0..width {
+                            let val = display_buf[w + width * h];
+                            self.buffer.push((val >> 16 & 0xFF) as u8);
+                            self.buffer.push((val >> 8 & 0xFF) as u8);
+                            self.buffer.push((val & 0xFF) as u8);
+                            self.buffer.push(0xFF);
+                        }
+                    }
+                    if height != self.height || width != self.width {
+                        //self.bindings.images[0].resize(_ctx, width as u32, height as u32, Some(&self.buffer));
+
+                        let texture = Texture::from_rgba8(_ctx, width as u16,  height as u16, &self.buffer);
+                        texture.set_filter(_ctx, FilterMode::Nearest);
+                        self.bindings.images[0] = texture;
+
+                        self.height = height;
+                        self.width = width;
+                    }
+                    self.bindings.images[0].update(_ctx, &self.buffer);
+                }
+                Err(RecvError) => {_ctx.quit(); return},
+            },
+            Err(TryRecvError::Empty) => {
+            }
+            Err(TryRecvError::Disconnected) => {_ctx.quit(); return},
+        }
+    }
+
+
+    fn draw(&mut self, ctx: &mut miniquad::Context) {
+        ctx.begin_default_pass(Default::default());
+        //self.bindings.images[0].update(ctx, &self.buffer);
+
+        ctx.apply_pipeline(&self.pipeline);
+        ctx.apply_bindings(&self.bindings);
+        ctx.apply_uniforms(&shader::Uniforms {
+            offset: (0., 0.),
+        });
+        ctx.draw(0, 6, 1);
+        ctx.end_render_pass();
+
+        ctx.commit_frame();
+    }
+}
+
+fn main() {
+}
+
+mod shader {
+    use miniquad::*;
+
+    pub const VERTEX: &str = r#"#version 100
+    attribute vec2 pos;
+    attribute vec2 uv;
+    uniform vec2 offset;
+    varying lowp vec2 texcoord;
+    void main() {
+        gl_Position = vec4(pos, 0, 1);
+        texcoord = uv;
+    }"#;
+
+    pub const FRAGMENT: &str = r#"#version 100
+    varying lowp vec2 texcoord;
+    uniform sampler2D tex;
+    void main() {
+        gl_FragColor = texture2D(tex, texcoord);
+    }"#;
+
+    pub fn meta() -> ShaderMeta {
+        ShaderMeta {
+            images: vec!["tex".to_string()],
+            uniforms: UniformBlockLayout {
+                uniforms: vec![UniformDesc::new("offset", UniformType::Float2)],
+            },
+        }
+    }
+
+    #[repr(C)]
+    pub struct Uniforms {
+        pub offset: (f32, f32),
+    }
 }
