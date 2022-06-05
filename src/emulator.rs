@@ -80,6 +80,7 @@ impl Emulator {
 
         let cpu_thread = thread::spawn(move || -> Result<(), anyhow::Error> {
             cpu.start_audio()?;
+            let reduce_flicker = true;
             loop {
                 if debug >= 2 {
                     println!("{:?}", cpu.keyboard.keys);
@@ -90,39 +91,58 @@ impl Emulator {
                 // Calculate next instruction
                 let instructions_done = cpu.tick()?;
 
-                //this variant skips frames
-                if skip_frames {
-                    // && cpu.display.updated{
-                    // The cpu.display.updated check can be added to increase IPS.
-                    // But it increases flickering due to short inbetween states
-                    // not being skipped.
-                    match tx_disp_notify.try_send(()) {
-                        Ok(..) => {
-                            match tx_disp.send((
-                                cpu.display.to_buf(),
-                                cpu.display.height,
-                                cpu.display.width,
-                            )) {
-                                Ok(..) => {}
-                                Err(SendError(..)) => {
-                                    break;
+                let send_display = | skip_frames : bool| -> bool {
+                    if skip_frames{
+                        match tx_disp_notify.try_send(()) {
+                            Ok(..) => {
+                                match tx_disp.send((
+                                    cpu.display.to_buf(),
+                                    cpu.display.height,
+                                    cpu.display.width,
+                                )) {
+                                    Ok(..) => {false}
+                                    Err(SendError(..)) => {
+                                        true
+                                    }
                                 }
                             }
-                            //cpu.display.updated = false;
+                            Err(TrySendError::Full(..)) => {false} //skipped frame
+                            Err(TrySendError::Disconnected(..)) => true,
                         }
-                        Err(TrySendError::Full(..)) => {} //skipped frame
-                        Err(TrySendError::Disconnected(..)) => break,
+                    } else {
+                        // wait until we can send the next frame
+                        match tx_disp_notify.send(()) {
+                            Ok(..) => {
+                                match tx_disp.send((
+                                    cpu.display.to_buf(),
+                                    cpu.display.height,
+                                    cpu.display.width,
+                                )) {
+                                    Ok(..) => { false}
+                                    Err(SendError(..)) => {
+                                        true
+                                    }
+                                }
+                            }
+                            Err(SendError(..)) => {
+                                true
+                            }
+                        }
                     }
-                } else if cpu.display.updated {
+                };
+
+                // If we draw to the real screen only on cpu display state change, we will get a lot of flickering.
+                // This is because after most display altering instructions, the frame will be in an
+                // incomplete state.
+                // We an reduce flickering by updating the display after each cpu instruction regardless of if the
+                // cpu display state changed. This time based periodic sampling of the display contents can
+                // reduce flicker because statistically most of the time the frame will be in a complete state
+                // while the chip 8 rom is waiting for input.
+                let always_update = reduce_flicker;
+                if always_update || cpu.display.updated {
+                    let err = send_display(skip_frames);
                     cpu.display.updated = false;
-                    match tx_disp.send((
-                        cpu.display.to_buf(),
-                        cpu.display.height,
-                        cpu.display.width,
-                    )) {
-                        Ok(..) => {}
-                        Err(SendError(..)) => break,
-                    }
+                    if err {break;}
                 }
 
                 match rx_keys.try_recv() {
